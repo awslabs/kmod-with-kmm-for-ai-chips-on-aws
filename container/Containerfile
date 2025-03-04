@@ -13,8 +13,8 @@ RUN mkdir -p /opt/lib/modules/${KERNEL_VERSION}/
 # Copy the pre-built neuron.ko from host
 COPY neuron.ko /opt/lib/modules/${KERNEL_VERSION}/
 
-# Run depmod
-RUN depmod -b /opt ${KERNEL_VERSION}
+# Run depmod (with warning suppression)
+RUN depmod -b /opt ${KERNEL_VERSION} 2>&1 | grep -v "WARNING: could not open modules\." || true
 
 # Add labels
 LABEL kernel-version=${KERNEL_VERSION} \
