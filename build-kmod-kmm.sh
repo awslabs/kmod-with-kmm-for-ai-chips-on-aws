@@ -151,6 +151,9 @@ if ! aws ecr describe-repositories --repository-names "${ECR_REPOSITORY_NAME}" -
     exit 1
 fi
 
+# Store the original script directory before changing directories
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
 # Clone repo once outside the loop
 echo "Cloning AWS Neuron driver repository..."
 TEMP_DIR=$(mktemp -d)
@@ -163,7 +166,7 @@ OUTPUT_DIR="${TEMP_DIR}/output"
 mkdir -p "${OUTPUT_DIR}"
 
 # Copy build script to temp directory
-cp "$(dirname "$0")/container/build-module.sh" "${TEMP_DIR}/"
+cp "${SCRIPT_DIR}/container/build-module.sh" "${TEMP_DIR}/"
 chmod +x "${TEMP_DIR}/build-module.sh"
 
 # Process driver-toolkit.json

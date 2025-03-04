@@ -63,7 +63,7 @@ Usage: ./build-kmod-kmm.sh DRIVER_VERSION [OCP_VERSION]
 Build and push kernel module container images for AWS Neuron
 
 Arguments:
-  DRIVER_VERSION    Neuron driver version (e.g., v2.16.7.0)
+  DRIVER_VERSION    Neuron driver version (e.g., 2.16.7.0)
   OCP_VERSION       Optional: OpenShift version (e.g., 4.16 or 4.16.2)
 ```
 
@@ -72,19 +72,19 @@ Arguments:
 Build for a specific driver version across all OCP versions:
 ```bash
 export ECR_REPOSITORY_NAME=my-ecr-repo
-./build-kmod-kmm.sh v2.16.7.0
+./build-kmod-kmm.sh 2.16.7.0
 ```
 
 Build for a specific driver version and OCP version:
 ```bash
 export ECR_REPOSITORY_NAME=my-ecr-repo
-./build-kmod-kmm.sh v2.16.7.0 4.16.2
+./build-kmod-kmm.sh 2.16.7.0 4.16.2
 ```
 
 Build for a specific driver version and OCP minor version (all patch versions):
 ```bash
 export ECR_REPOSITORY_NAME=my-ecr-repo
-./build-kmod-kmm.sh v2.16.7.0 4.16
+./build-kmod-kmm.sh 2.16.7.0 4.16
 ```
 
 ### Image Tags
