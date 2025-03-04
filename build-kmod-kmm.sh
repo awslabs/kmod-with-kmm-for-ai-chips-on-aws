@@ -14,20 +14,36 @@ validate_aws_credentials() {
     fi
 }
 
-# Configuration
-NEURON_DRIVER_VERSION="$1"  # Pass as first argument
-OCP_VERSION="$2"           # Pass as second argument
+# Function to check if a version matches the filter
+version_matches() {
+    local version="$1"
+    local filter="$2"
+    
+    # If filter is a complete version (x.y.z), exact match is required
+    if [[ $filter =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        [[ "$version" == "$filter" ]]
+    # If filter is a minor version (x.y), match the prefix
+    elif [[ $filter =~ ^[0-9]+\.[0-9]+$ ]]; then
+        [[ "$version" =~ ^$filter\.[0-9]+$ ]]
+    else
+        echo "Invalid version filter format: $filter"
+        return 1
+    fi
+}
 
-# Check if required arguments are provided
-if [ $# -ne 2 ]; then
-    echo "Usage: $0 DRIVER_VERSION OCP_VERSION"
+# Configuration
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    echo "Usage: $0 DRIVER_VERSION [OCP_VERSION]"
     echo "Build and push kernel module container images for AWS Neuron"
     echo ""
     echo "Arguments:"
     echo "  DRIVER_VERSION    Neuron driver version (e.g., v2.16.7.0)"
-    echo "  OCP_VERSION      OpenShift version (e.g., 4.14)"
+    echo "  OCP_VERSION      Optional: OpenShift version (e.g., 4.16 or 4.16.2)"
     exit 1
 fi
+
+NEURON_DRIVER_VERSION="$1"
+OCP_VERSION="${2:-}"  # Optional parameter
 
 # Check if required environment variables are set
 if [ -z "${ECR_REPOSITORY:-}" ]; then
@@ -84,21 +100,22 @@ fi
 
 # Function to build and push image
 build_and_push_image() {
-    local kernel_version="$1"
-    local dtk_image="$2"
-    local tag="$3"
+    local dtk_image="$1"
+    local ocp_version="$2"
+    local tag="${NEURON_DRIVER_VERSION}-ocp${ocp_version}"
 
-    echo "Building image for kernel version: ${kernel_version}"
+    echo "Building image for OCP version: ${ocp_version}"
     echo "Using DTK image: ${dtk_image}"
 
     # Create temporary file for image ID
     local temp_id_file=$(mktemp)
 
-    # Build the image
+    # Build the image with explicit amd64 platform
     podman build \
+        --platform=linux/amd64 \
         --build-arg NEURON_DRIVER_VERSION="${NEURON_DRIVER_VERSION}" \
         --build-arg DTK_IMAGE="${dtk_image}" \
-        --build-arg OCP_VERSION="${OCP_VERSION}" \
+        --build-arg OCP_VERSION="${ocp_version}" \
         --iidfile "${temp_id_file}" \
         -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}" \
         -f Containerfile .
@@ -131,18 +148,18 @@ build_and_push_image() {
     rm "${temp_id_file}"
 }
 
-# Read and process driver-toolkit.json
-while IFS= read -r kernel_version; do
-    # Extract OCP version from kernel version
-    ocp_version=$(echo "$kernel_version" | sed -E 's/.*el([0-9]+)_.*/\1/')
+# Process driver-toolkit.json
+echo "Processing driver-toolkit.json..."
+while IFS= read -r entry; do
+    version=$(echo "$entry" | jq -r '.version')
+    dtk_image=$(echo "$entry" | jq -r '.dtk')
     
-    # Construct DTK image URL
-    dtk_image="${ECR_REGISTRY}/driver-toolkit:${kernel_version}"
+    # Skip if OCP_VERSION is set and version doesn't match the filter
+    if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
+        continue
+    fi
     
-    # Create tag using driver version and OCP version
-    tag="${NEURON_DRIVER_VERSION}-ocp${OCP_VERSION}"
-    
-    build_and_push_image "$kernel_version" "$dtk_image" "$tag"
-done < <(jq -r '.KERNEL_VERSION' driver-toolkit.json)
+    build_and_push_image "$dtk_image" "$version"
+done < <(jq -c '.[]' driver-toolkit/driver-toolkit.json)
 
 echo "All images built and pushed successfully!"
