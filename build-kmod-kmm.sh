@@ -194,6 +194,14 @@ while IFS= read -r entry; do
     
     echo "Processing OCP version: ${version}"
     
+    # Pull the DTK image
+    echo "Pulling DTK image: ${dtk_ecr_image}"
+    podman pull ${dtk_ecr_image} >/dev/null
+    
+    # Get the image ID of the DTK image for later cleanup - using a more reliable method
+    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' ${dtk_ecr_image} 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_ecr_image}")
+    echo "DTK Image ID: ${DTK_IMAGE_ID}"
+    
     # Extract kernel version from DTK container
     echo "Extracting kernel version from DTK image..."
     KERNEL_VERSION=$(podman run --rm ${dtk_ecr_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
@@ -246,9 +254,20 @@ while IFS= read -r entry; do
     
     # Clean up this version's container images
     echo "Cleaning up container images..."
+    # First remove the tags
     podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
     podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
+    # Then remove the image by ID to ensure complete removal
     podman rmi "${IMAGE_ID}" || true
+    
+    # Clean up the DTK image used for this build
+    echo "Cleaning up DTK image..."
+    # First remove the tag
+    podman rmi "${dtk_ecr_image}" || true
+    # Then remove by ID to ensure complete removal
+    if [ -n "${DTK_IMAGE_ID}" ]; then
+        podman rmi "${DTK_IMAGE_ID}" || true
+    fi
     
     # Clean the output directory for the next build
     rm -f "${OUTPUT_DIR}/neuron.ko"
@@ -258,5 +277,14 @@ done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 # Final cleanup
 echo "Cleaning up temporary directory..."
 rm -rf "${TEMP_DIR}"
+
+# Clean up any dangling images (those with <none> as repository and tag)
+echo "Cleaning up dangling images..."
+DANGLING_IMAGES=$(podman images -f "dangling=true" -q)
+if [ -n "${DANGLING_IMAGES}" ]; then
+    podman rmi ${DANGLING_IMAGES} || true
+else
+    echo "No dangling images found"
+fi
 
 echo "All images built and pushed successfully!"
