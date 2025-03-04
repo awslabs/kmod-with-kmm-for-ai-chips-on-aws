@@ -1,0 +1,49 @@
+ARG NEURON_DRIVER_VERSION
+ARG DTK_IMAGE
+ARG OCP_VERSION
+
+FROM fedora as source
+
+# Clone specific version of neuron driver
+RUN dnf install -y git
+RUN git clone https://github.com/wombelix/aws-neuron-driver.git /tmp/aws-neuron-driver
+WORKDIR /tmp/aws-neuron-driver
+ARG NEURON_DRIVER_VERSION
+RUN git checkout ${NEURON_DRIVER_VERSION}
+
+# DTK image
+FROM ${DTK_IMAGE} as build
+
+# Redeclare the ARG to use it in this stage
+ARG NEURON_DRIVER_VERSION
+
+# Install jq for JSON parsing
+RUN dnf install -y jq
+
+# Extract kernel version from driver-toolkit-release.json
+RUN jq -r '.KERNEL_VERSION' /etc/driver-toolkit-release.json > /kernel_version.ver
+
+# Copy only the src directory from the source stage
+COPY --from=source /tmp/aws-neuron-driver/src /aws-neuron-driver
+WORKDIR /aws-neuron-driver
+
+# Fixing the neuron source code for compilation if version is lower than 2.18.12.0
+RUN if [ $(echo "${NEURON_DRIVER_VERSION} 2.18.12.0" | tr " " "\n" | sort -V | head -n 1) != "2.18.12.0" ]; then \
+        sed -i "s/\$(shell uname -r)/$(cat /kernel_version.ver)/g" Makefile && \
+        sed -i "s/KERNEL_VERSION(6, 4, 0)/KERNEL_VERSION(5, 14, 0)/g" neuron_cdev.c; \
+    fi && \
+    make
+
+# Final image
+FROM alpine
+
+COPY --from=build /kernel_version.ver /kernel_version.ver
+RUN mkdir -p /opt/lib/modules/$(cat /kernel_version.ver)/kernel/drivers/neuron
+COPY --from=build /aws-neuron-driver/neuron.ko /opt/lib/modules/$(cat /kernel_version.ver)/kernel/drivers/neuron/neuron.ko
+RUN depmod -b /opt
+
+# Add kernel version label to final image
+ARG KERNEL_VERSION=$(cat /kernel_version.env)
+ARG OCP_VERSION
+LABEL kernel-version=$KERNEL_VERSION \
+      ocp-version=$OCP_VERSION
