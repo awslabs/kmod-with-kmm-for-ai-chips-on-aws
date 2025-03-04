@@ -71,6 +71,18 @@ version_matches() {
     fi
 }
 
+# Function to check if an image with a specific tag exists in ECR
+image_exists_in_ecr() {
+    local repository="$1"
+    local tag="$2"
+    
+    aws ecr describe-images \
+        --repository-name "${repository}" \
+        --image-ids imageTag="${tag}" \
+        --no-cli-pager >/dev/null 2>&1
+    return $?
+}
+
 # Configuration
 if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "Usage: $0 DRIVER_VERSION [OCP_VERSION]"
@@ -79,11 +91,20 @@ if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "Arguments:"
     echo "  DRIVER_VERSION    Neuron driver version (e.g., v2.16.7.0)"
     echo "  OCP_VERSION      Optional: OpenShift version (e.g., 4.16 or 4.16.2)"
+    echo ""
+    echo "Environment variables:"
+    echo "  FORCE_BUILD       Set to 'true' to force rebuilding images even if they already exist"
     exit 1
 fi
 
 NEURON_DRIVER_VERSION="$1"
 OCP_VERSION="${2:-}"  # Optional parameter
+
+# Check if FORCE_BUILD is set to force rebuilding images even if they exist
+FORCE_BUILD="${FORCE_BUILD:-false}"
+if [ "${FORCE_BUILD}" = "true" ]; then
+    echo "FORCE_BUILD is set to true, will rebuild images even if they already exist"
+fi
 
 # Check if required environment variables are set
 if [ -z "${KMOD_ECR_REPOSITORY_NAME:-}" ]; then
@@ -189,6 +210,15 @@ while IFS= read -r entry; do
         continue
     fi
     
+    # Create base tag for this version
+    BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
+    
+    # Check if image with this tag already exists in ECR
+    if [ "${FORCE_BUILD}" != "true" ] && image_exists_in_ecr "${KMOD_ECR_REPOSITORY_NAME}" "${BASE_TAG}"; then
+        echo "Image with tag ${BASE_TAG} already exists in ECR, skipping build..."
+        continue
+    fi
+    
     # Get DTK image from ECR
     dtk_ecr_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
     
@@ -228,8 +258,7 @@ while IFS= read -r entry; do
         continue
     fi
     
-    # Create tags with full version information
-    BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
+    # Create full tag with kernel version information
     FULL_TAG="${BASE_TAG}-kernel${KERNEL_VERSION}"
     
     # Build final image

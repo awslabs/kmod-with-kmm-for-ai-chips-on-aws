@@ -55,6 +55,7 @@ The `build-kmod-kmm.sh` script automates the process of building and pushing ker
 - `AWS_REGION`: AWS region for ECR (will use default from AWS CLI config if not specified)
 - `AWS_ACCOUNT_ID`: AWS account ID (will be auto-detected if not specified)
 - `AWS_PROFILE`: AWS profile to use (optional)
+- `FORCE_BUILD`: (Optional) Set to "true" to force rebuilding images even if they already exist in ECR. Defaults to "false".
 
 ### Command Line Arguments
 
@@ -62,9 +63,12 @@ The `build-kmod-kmm.sh` script automates the process of building and pushing ker
 Usage: ./build-kmod-kmm.sh DRIVER_VERSION [OCP_VERSION]
 
 Build and push kernel module container images for AWS Neuron
-
 Arguments:
   DRIVER_VERSION    Neuron driver version (e.g., 2.16.7.0)
+  OCP_VERSION       Optional: OpenShift version (e.g., 4.16 or 4.16.2)
+
+Environment variables:
+  FORCE_BUILD       Set to 'true' to force rebuilding images even if they already exist
   OCP_VERSION       Optional: OpenShift version (e.g., 4.16 or 4.16.2)
 ```
 
@@ -93,6 +97,12 @@ Build for a specific driver version and OCP minor version (all patch versions):
 ```bash
 # Uses default repository names
 ./build-kmod-kmm.sh 2.16.7.0 4.16
+```
+
+Force rebuild of images even if they already exist in ECR:
+```bash
+# Force rebuild of all images
+FORCE_BUILD=true ./build-kmod-kmm.sh 2.16.7.0
 ```
 
 ### Image Tags
