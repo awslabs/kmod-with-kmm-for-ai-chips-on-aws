@@ -102,9 +102,15 @@ jq -c '.[]' driver-toolkit.json | while read -r item; do
             exit 1
         fi
         
+        # Get the image ID of the pulled image for later cleanup
+        PULLED_IMAGE_ID=$(podman inspect --format '{{.Id}}' "${dtk_image}" 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
+        
         # Tag the image for ECR
         ecr_tag="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
         podman tag "${dtk_image}" "${ecr_tag}" >/dev/null 2>&1
+        
+        # Get the image ID of the tagged image for later cleanup
+        TAGGED_IMAGE_ID=$(podman inspect --format '{{.Id}}' "${ecr_tag}" 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${ecr_tag}")
         
         echo "Pushing image to ECR with tag ${version}..."
         if ! podman push "${ecr_tag}" >/dev/null 2>&1; then
@@ -127,12 +133,31 @@ jq -c '.[]' driver-toolkit.json | while read -r item; do
         
         # Cleanup both the original and tagged images
         echo "Cleaning up local images..."
+        # First remove by tags
         podman rmi "${dtk_image}" "${ecr_tag}" >/dev/null 2>&1 || true
+        
+        # Then remove by image IDs to ensure complete removal
+        if [ -n "${PULLED_IMAGE_ID}" ]; then
+            podman rmi "${PULLED_IMAGE_ID}" >/dev/null 2>&1 || true
+        fi
+        
+        if [ -n "${TAGGED_IMAGE_ID}" ] && [ "${PULLED_IMAGE_ID}" != "${TAGGED_IMAGE_ID}" ]; then
+            podman rmi "${TAGGED_IMAGE_ID}" >/dev/null 2>&1 || true
+        fi
         
     else
         echo "Image for version ${version} already exists in ECR, skipping..."
     fi
 
 done
+
+# Clean up any dangling images (those with <none> as repository and tag)
+echo "Cleaning up dangling images..."
+DANGLING_IMAGES=$(podman images -f "dangling=true" -q)
+if [ -n "${DANGLING_IMAGES}" ]; then
+    podman rmi ${DANGLING_IMAGES} >/dev/null 2>&1 || true
+else
+    echo "No dangling images found"
+fi
 
 echo "Sync completed"
