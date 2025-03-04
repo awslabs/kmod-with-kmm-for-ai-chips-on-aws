@@ -29,13 +29,9 @@ fi
 
 # Check if required environment variables are set
 if [ -z "${DTK_ECR_REPOSITORY_NAME:-}" ]; then
-    # Backward compatibility: use ECR_REPOSITORY_NAME if DTK_ECR_REPOSITORY_NAME is not set
-    DTK_ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME:-}"
-    
-    if [ -z "${DTK_ECR_REPOSITORY_NAME}" ]; then
-        echo "Please set DTK_ECR_REPOSITORY_NAME (or legacy ECR_REPOSITORY_NAME) environment variable"
-        exit 1
-    fi
+    # Use default repository name if not set
+    DTK_ECR_REPOSITORY_NAME="neuron-operator/driver-toolkit"
+    echo "Using default repository name: ${DTK_ECR_REPOSITORY_NAME}"
 fi
 
 # If AWS_PROFILE is set, use it

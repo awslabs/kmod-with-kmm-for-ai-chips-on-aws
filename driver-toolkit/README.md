@@ -56,11 +56,10 @@ Syncs Driver Toolkit images from Quay.io to a private AWS ECR repository.
 Configuration options:
 
 ```bash
-# Legacy configuration (still supported)
-export ECR_REPOSITORY_NAME="your-repository-name"
+# Use default repository name (neuron-operator/driver-toolkit)
 ./dtk-sync-to-ecr.sh
 
-# New configuration with dedicated DTK repository
+# Or specify a custom repository name
 export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 ./dtk-sync-to-ecr.sh
 ```
@@ -73,7 +72,7 @@ The script supports multiple authentication methods:
 
 ```bash
 export AWS_PROFILE="your-profile-name"
-export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
+# DTK_ECR_REPOSITORY_NAME is optional, defaults to neuron-operator/driver-toolkit
 ./dtk-sync-to-ecr.sh
 ```
 
@@ -83,9 +82,10 @@ export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 ```bash
 export AWS_ACCESS_KEY_ID="your-key"
 export AWS_SECRET_ACCESS_KEY="your-secret"
-export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 # Optional: Override region from AWS config
 export AWS_REGION="your-region"
+# Optional: Override default repository name
+export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 ./dtk-sync-to-ecr.sh
 ```
 
@@ -93,7 +93,7 @@ export AWS_REGION="your-region"
 
 ```bash
 # Uses credentials and region from ~/.aws/config
-export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
+# Uses default repository name (neuron-operator/driver-toolkit)
 ./dtk-sync-to-ecr.sh
 ```
 

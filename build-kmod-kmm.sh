@@ -87,19 +87,15 @@ OCP_VERSION="${2:-}"  # Optional parameter
 
 # Check if required environment variables are set
 if [ -z "${KMOD_ECR_REPOSITORY_NAME:-}" ]; then
-    # Backward compatibility: use ECR_REPOSITORY_NAME if KMOD_ECR_REPOSITORY_NAME is not set
-    KMOD_ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME:-}"
-    
-    if [ -z "${KMOD_ECR_REPOSITORY_NAME}" ]; then
-        echo "Please set KMOD_ECR_REPOSITORY_NAME (or legacy ECR_REPOSITORY_NAME) environment variable"
-        exit 1
-    fi
+    # Use default repository name if not set
+    KMOD_ECR_REPOSITORY_NAME="neuron-operator/kmod"
+    echo "Using default repository name: ${KMOD_ECR_REPOSITORY_NAME}"
 fi
 
-# Set DTK repository name with fallback to KMOD_ECR_REPOSITORY_NAME for backward compatibility
+# Set DTK repository name with default value
 if [ -z "${DTK_ECR_REPOSITORY_NAME:-}" ]; then
-    DTK_ECR_REPOSITORY_NAME="${KMOD_ECR_REPOSITORY_NAME}"
-    echo "DTK_ECR_REPOSITORY_NAME not set, using ${DTK_ECR_REPOSITORY_NAME} for driver toolkit images"
+    DTK_ECR_REPOSITORY_NAME="neuron-operator/driver-toolkit"
+    echo "DTK_ECR_REPOSITORY_NAME not set, using default: ${DTK_ECR_REPOSITORY_NAME}"
 fi
 
 if [ -z "${AWS_REGION:-}" ]; then
@@ -156,8 +152,8 @@ aws ecr get-login-password --region "${AWS_REGION}" --no-cli-pager | \
     podman login --username AWS --password-stdin "${ECR_REGISTRY}"
 
 # Check if repository exists (suppress output)
-if ! aws ecr describe-repositories --repository-names "${ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
-    echo "Error: ECR repository ${ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
+if ! aws ecr describe-repositories --repository-names "${KMOD_ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
+    echo "Error: ECR repository ${KMOD_ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
     echo "Please create the repository before running this script"
     exit 1
 fi

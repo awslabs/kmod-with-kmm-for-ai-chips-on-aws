@@ -50,9 +50,8 @@ The `build-kmod-kmm.sh` script automates the process of building and pushing ker
 
 ### Environment Variables
 
-- `ECR_REPOSITORY_NAME`: (Legacy, still supported) Name of the ECR repository for both DTK images and built kernel modules
-- `DTK_ECR_REPOSITORY_NAME`: (Optional) Name of the ECR repository for Driver Toolkit images
-- `KMOD_ECR_REPOSITORY_NAME`: (Optional) Name of the ECR repository for built kernel modules
+- `DTK_ECR_REPOSITORY_NAME`: (Optional) Name of the ECR repository for Driver Toolkit images. Defaults to "neuron-operator/driver-toolkit" if not set.
+- `KMOD_ECR_REPOSITORY_NAME`: (Optional) Name of the ECR repository for built kernel modules. Defaults to "neuron-operator/kmod" if not set.
 - `AWS_REGION`: AWS region for ECR (will use default from AWS CLI config if not specified)
 - `AWS_ACCOUNT_ID`: AWS account ID (will be auto-detected if not specified)
 - `AWS_PROFILE`: AWS profile to use (optional)
@@ -71,13 +70,13 @@ Arguments:
 
 ### Examples
 
-Build for a specific driver version across all OCP versions using the same repository for both DTK and kernel modules:
+Build for a specific driver version across all OCP versions using default repository names:
 ```bash
-export ECR_REPOSITORY_NAME=my-ecr-repo
+# Uses neuron-operator/driver-toolkit and neuron-operator/kmod
 ./build-kmod-kmm.sh 2.16.7.0
 ```
 
-Build using separate repositories for DTK images and kernel modules:
+Build using custom repositories for DTK images and kernel modules:
 ```bash
 export DTK_ECR_REPOSITORY_NAME=my-dtk-repo
 export KMOD_ECR_REPOSITORY_NAME=my-kmod-repo
@@ -86,15 +85,13 @@ export KMOD_ECR_REPOSITORY_NAME=my-kmod-repo
 
 Build for a specific driver version and OCP version:
 ```bash
-export DTK_ECR_REPOSITORY_NAME=my-dtk-repo
-export KMOD_ECR_REPOSITORY_NAME=my-kmod-repo
+# Uses default repository names
 ./build-kmod-kmm.sh 2.16.7.0 4.16.2
 ```
 
 Build for a specific driver version and OCP minor version (all patch versions):
 ```bash
-export DTK_ECR_REPOSITORY_NAME=my-dtk-repo
-export KMOD_ECR_REPOSITORY_NAME=my-kmod-repo
+# Uses default repository names
 ./build-kmod-kmm.sh 2.16.7.0 4.16
 ```
 
