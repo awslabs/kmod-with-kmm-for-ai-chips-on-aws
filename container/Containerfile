@@ -1,0 +1,21 @@
+FROM alpine
+
+# Install kmod for depmod command
+RUN apk add --no-cache kmod
+
+# ARGs for kernel version and OCP version
+ARG KERNEL_VERSION
+ARG OCP_VERSION
+
+# Create directory structure
+RUN mkdir -p /opt/lib/modules/${KERNEL_VERSION}/
+
+# Copy the pre-built neuron.ko from host
+COPY neuron.ko /opt/lib/modules/${KERNEL_VERSION}/
+
+# Run depmod
+RUN depmod -b /opt ${KERNEL_VERSION}
+
+# Add labels
+LABEL kernel-version=${KERNEL_VERSION} \
+      ocp-version=${OCP_VERSION}

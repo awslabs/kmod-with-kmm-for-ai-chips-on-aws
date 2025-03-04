@@ -136,7 +136,6 @@ if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
     AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --no-cli-pager)
 fi
 
-
 # ECR registry URL
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
@@ -152,50 +151,20 @@ if ! aws ecr describe-repositories --repository-names "${ECR_REPOSITORY_NAME}" -
     exit 1
 fi
 
-# Function to build and push image
-build_and_push_image() {
-    local ocp_version="$1"
-    
-    # Construct the DTK image URL from ECR using the same logic as in dtk-sync-to-ecr.sh
-    local dtk_ecr_image="${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${ocp_version}"
-    
-    echo "Building image for OCP version: ${ocp_version}"
-    echo "Using DTK image from ECR: ${dtk_ecr_image}"
+# Clone repo once outside the loop
+echo "Cloning AWS Neuron driver repository..."
+TEMP_DIR=$(mktemp -d)
+git clone https://github.com/wombelix/aws-neuron-driver.git "${TEMP_DIR}/aws-neuron-driver"
+cd "${TEMP_DIR}/aws-neuron-driver"
+git checkout ${NEURON_DRIVER_VERSION}
 
-    # Create temporary file for image ID
-    local temp_id_file=$(mktemp)
+# Create output directory for all builds
+OUTPUT_DIR="${TEMP_DIR}/output"
+mkdir -p "${OUTPUT_DIR}"
 
-    # Build the image with explicit amd64 platform
-    podman build \
-        --platform=linux/amd64 \
-        --build-arg NEURON_DRIVER_VERSION="${NEURON_DRIVER_VERSION}" \
-        --build-arg DTK_IMAGE="${dtk_ecr_image}" \
-        --build-arg OCP_VERSION="${ocp_version}" \
-        --iidfile "${temp_id_file}" \
-        -f Containerfile .
-
-    # Get the image ID and kernel version from label
-    local image_id=$(cat "${temp_id_file}")
-    local built_kernel_version=$(podman inspect "${image_id}" --format '{{ index .Labels "kernel-version" }}')
-    
-    # Create the single, complete tag with the final format
-    local tag="neuron-driver${NEURON_DRIVER_VERSION}-ocp${ocp_version}-kernel${built_kernel_version}"
-    
-    # Tag the image
-    podman tag "${image_id}" "${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}"
-
-    echo "Pushing image to ECR..."
-    if ! podman push "${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}" >/dev/null 2>&1; then
-        echo "Error: Failed to push image to ECR"
-        podman rmi "${image_id}" >/dev/null 2>&1 || true
-        rm "${temp_id_file}"
-        exit 1
-    fi
-
-    # Clean up
-    podman rmi "${image_id}" >/dev/null 2>&1 || true
-    rm "${temp_id_file}"
-}
+# Copy build script to temp directory
+cp "$(dirname "$0")/container/build-module.sh" "${TEMP_DIR}/"
+chmod +x "${TEMP_DIR}/build-module.sh"
 
 # Process driver-toolkit.json
 echo "Processing driver-toolkit.json..."
@@ -207,7 +176,74 @@ while IFS= read -r entry; do
         continue
     fi
     
-    build_and_push_image "$version"
-done < <(jq -c '.[]' driver-toolkit/driver-toolkit.json)
+    # Get DTK image from ECR
+    dtk_ecr_image="${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${version}"
+    
+    echo "Processing OCP version: ${version}"
+    
+    # Extract kernel version from DTK container
+    echo "Extracting kernel version from DTK image..."
+    KERNEL_VERSION=$(podman run --rm ${dtk_ecr_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
+    
+    if [ -z "${KERNEL_VERSION}" ]; then
+        echo "Error: Failed to extract kernel version from DTK image"
+        continue
+    fi
+    
+    echo "Detected kernel version: ${KERNEL_VERSION}"
+    
+    # Build kernel module
+    echo "Building kernel module for kernel ${KERNEL_VERSION}..."
+    podman run --rm \
+        -v "${TEMP_DIR}/aws-neuron-driver:/aws-neuron-driver:Z" \
+        -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
+        -v "${OUTPUT_DIR}:/output:Z" \
+        ${dtk_ecr_image} \
+        /build-module.sh "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}"
+    
+    # Check if build was successful
+    if [ ! -f "${OUTPUT_DIR}/neuron.ko" ]; then
+        echo "Error: Failed to build neuron.ko"
+        continue
+    fi
+    
+    # Create tags with full version information
+    BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
+    FULL_TAG="${BASE_TAG}-kernel${KERNEL_VERSION}"
+    
+    # Build final image
+    echo "Building final image with tag: ${FULL_TAG}"
+    podman build \
+        --platform=linux/amd64 \
+        --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
+        --build-arg OCP_VERSION="${version}" \
+        -f "$(dirname "$0")/container/Containerfile" \
+        -t "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}" \
+        --iidfile "${TEMP_DIR}/image.id" \
+        "${OUTPUT_DIR}"
+    
+    # Add the base tag as well
+    IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
+    podman tag "${IMAGE_ID}" "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${BASE_TAG}"
+    
+    # Push images
+    echo "Pushing images to ECR..."
+    podman push "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}"
+    podman push "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${BASE_TAG}"
+    
+    # Clean up this version's container images
+    echo "Cleaning up container images..."
+    podman rmi "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
+    podman rmi "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
+    podman rmi "${IMAGE_ID}" || true
+    
+    # Clean the output directory for the next build
+    rm -f "${OUTPUT_DIR}/neuron.ko"
+    
+done < <(jq -c '.[]' "$(dirname "$0")/driver-toolkit/driver-toolkit.json")
+
+# Final cleanup
+echo "Cleaning up temporary directory..."
+rm -rf "${TEMP_DIR}"
 
 echo "All images built and pushed successfully!"
