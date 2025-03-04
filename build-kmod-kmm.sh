@@ -46,8 +46,8 @@ NEURON_DRIVER_VERSION="$1"
 OCP_VERSION="${2:-}"  # Optional parameter
 
 # Check if required environment variables are set
-if [ -z "${ECR_REPOSITORY:-}" ]; then
-    echo "Please set ECR_REPOSITORY environment variable"
+if [ -z "${ECR_REPOSITORY_NAME:-}" ]; then
+    echo "Please set ECR_REPOSITORY_NAME environment variable"
     exit 1
 fi
 
@@ -92,20 +92,21 @@ aws ecr get-login-password --region "${AWS_REGION}" --no-cli-pager | \
     podman login --username AWS --password-stdin "${ECR_REGISTRY}"
 
 # Check if repository exists (suppress output)
-if ! aws ecr describe-repositories --repository-names "${ECR_REPOSITORY}" --no-cli-pager >/dev/null 2>&1; then
-    echo "Error: ECR repository ${ECR_REPOSITORY} does not exist in ${AWS_REGION}"
+if ! aws ecr describe-repositories --repository-names "${ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
+    echo "Error: ECR repository ${ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
     echo "Please create the repository before running this script"
     exit 1
 fi
 
 # Function to build and push image
 build_and_push_image() {
-    local dtk_image="$1"
-    local ocp_version="$2"
-    local tag="${NEURON_DRIVER_VERSION}-ocp${ocp_version}"
-
+    local ocp_version="$1"
+    
+    # Construct the DTK image URL from ECR using the same logic as in dtk-sync-to-ecr.sh
+    local dtk_ecr_image="${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${ocp_version}"
+    
     echo "Building image for OCP version: ${ocp_version}"
-    echo "Using DTK image: ${dtk_image}"
+    echo "Using DTK image from ECR: ${dtk_ecr_image}"
 
     # Create temporary file for image ID
     local temp_id_file=$(mktemp)
@@ -114,30 +115,24 @@ build_and_push_image() {
     podman build \
         --platform=linux/amd64 \
         --build-arg NEURON_DRIVER_VERSION="${NEURON_DRIVER_VERSION}" \
-        --build-arg DTK_IMAGE="${dtk_image}" \
+        --build-arg DTK_IMAGE="${dtk_ecr_image}" \
         --build-arg OCP_VERSION="${ocp_version}" \
         --iidfile "${temp_id_file}" \
-        -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}" \
         -f Containerfile .
 
     # Get the image ID and kernel version from label
     local image_id=$(cat "${temp_id_file}")
     local built_kernel_version=$(podman inspect "${image_id}" --format '{{ index .Labels "kernel-version" }}')
     
-    # Additional tag with kernel version
-    local kernel_tag="${tag}-${built_kernel_version}"
-    podman tag "${image_id}" "${ECR_REGISTRY}/${ECR_REPOSITORY}:${kernel_tag}"
+    # Create the single, complete tag with the final format
+    local tag="neuron-driver${NEURON_DRIVER_VERSION}-ocp${ocp_version}-kernel${built_kernel_version}"
+    
+    # Tag the image
+    podman tag "${image_id}" "${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}"
 
-    echo "Pushing images to ECR..."
+    echo "Pushing image to ECR..."
     if ! podman push "${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}" >/dev/null 2>&1; then
         echo "Error: Failed to push image to ECR"
-        podman rmi "${image_id}" >/dev/null 2>&1 || true
-        rm "${temp_id_file}"
-        exit 1
-    fi
-
-    if ! podman push "${ECR_REGISTRY}/${ECR_REPOSITORY}:${kernel_tag}" >/dev/null 2>&1; then
-        echo "Error: Failed to push kernel-tagged image to ECR"
         podman rmi "${image_id}" >/dev/null 2>&1 || true
         rm "${temp_id_file}"
         exit 1
@@ -152,14 +147,13 @@ build_and_push_image() {
 echo "Processing driver-toolkit.json..."
 while IFS= read -r entry; do
     version=$(echo "$entry" | jq -r '.version')
-    dtk_image=$(echo "$entry" | jq -r '.dtk')
     
     # Skip if OCP_VERSION is set and version doesn't match the filter
     if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
         continue
     fi
     
-    build_and_push_image "$dtk_image" "$version"
+    build_and_push_image "$version"
 done < <(jq -c '.[]' driver-toolkit/driver-toolkit.json)
 
 echo "All images built and pushed successfully!"

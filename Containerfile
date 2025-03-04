@@ -27,12 +27,33 @@ RUN jq -r '.KERNEL_VERSION' /etc/driver-toolkit-release.json > /kernel_version.v
 COPY --from=source /tmp/aws-neuron-driver/src /aws-neuron-driver
 WORKDIR /aws-neuron-driver
 
-# Fixing the neuron source code for compilation if version is lower than 2.18.12.0
+# Split the version check into its own layer
+RUN echo "Checking version ${NEURON_DRIVER_VERSION} against 2.18.12.0" && \
+    if [ $(echo "${NEURON_DRIVER_VERSION} 2.18.12.0" | tr " " "\n" | sort -V | head -n 1) != "2.18.12.0" ]; then \
+        echo "Version requires patching"; \
+    else \
+        echo "Version does not require patching"; \
+    fi
+
+# Split the Makefile patching into its own layer
 RUN if [ $(echo "${NEURON_DRIVER_VERSION} 2.18.12.0" | tr " " "\n" | sort -V | head -n 1) != "2.18.12.0" ]; then \
+        echo "Patching Makefile..." && \
         sed -i "s/\$(shell uname -r)/$(cat /kernel_version.ver)/g" Makefile && \
-        sed -i "s/KERNEL_VERSION(6, 4, 0)/KERNEL_VERSION(5, 14, 0)/g" neuron_cdev.c; \
-    fi && \
-    make
+        cat Makefile; \
+    fi
+
+# Split the neuron_cdev.c patching into its own layer
+RUN if [ $(echo "${NEURON_DRIVER_VERSION} 2.18.12.0" | tr " " "\n" | sort -V | head -n 1) != "2.18.12.0" ]; then \
+        echo "Patching neuron_cdev.c..." && \
+        sed -i "s/KERNEL_VERSION(6, 4, 0)/KERNEL_VERSION(5, 14, 0)/g" neuron_cdev.c && \
+        cat neuron_cdev.c; \
+    fi
+
+# Make command in its own layer
+RUN echo "Building kernel module..." && \
+    echo "Kernel version: $(cat /kernel_version.ver)" && \
+    cd /aws-neuron-driver && \
+    make -C /lib/modules/$(cat /kernel_version.ver)/build M=$(pwd) modules
 
 # Final image
 FROM alpine
