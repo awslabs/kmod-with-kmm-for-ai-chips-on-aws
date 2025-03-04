@@ -1,5 +1,45 @@
 #!/bin/bash
+
+echo "Script starting..."
+
+# Function to check if a command exists
+check_command() {
+    echo "Checking for command: $1"
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "Error: $1 is not installed"
+        case "$1" in
+            aws)
+                echo "To install AWS CLI:"
+                echo "  For RHEL/CentOS: sudo yum install awscli"
+                echo "  For Ubuntu/Debian: sudo apt-get install awscli"
+                echo "  For macOS: brew install awscli"
+                echo "  Or visit: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+                ;;
+            jq)
+                echo "To install jq:"
+                echo "  For RHEL/CentOS: sudo yum install jq"
+                echo "  For Ubuntu/Debian: sudo apt-get install jq"
+                echo "  For macOS: brew install jq"
+                ;;
+            podman)
+                echo "To install podman:"
+                echo "  For RHEL/CentOS: sudo yum install podman"
+                echo "  For Ubuntu/Debian: sudo apt-get install podman"
+                echo "  For macOS: brew install podman"
+                ;;
+        esac
+        exit 1
+    fi
+}
+
+echo "Setting up error handling..."
 set -euo pipefail
+
+echo "Checking required commands..."
+# Check for required commands
+for cmd in aws jq podman; do
+    check_command "$cmd"
+done
 
 # Function to check if running in GitHub Actions
 is_github_actions() {
@@ -51,6 +91,19 @@ if [ -z "${ECR_REPOSITORY_NAME:-}" ]; then
     exit 1
 fi
 
+if [ -z "${AWS_REGION:-}" ]; then
+    AWS_REGION=$(aws configure get region || echo "")
+    if [ -z "${AWS_REGION}" ]; then
+        echo "Error: AWS_REGION is not set and couldn't be retrieved from AWS configuration"
+        echo "Please either:"
+        echo "  - Set AWS_REGION environment variable"
+        echo "  - Configure a default region with 'aws configure'"
+        echo "  - Or specify a region in your AWS profile"
+        exit 1
+    fi
+fi
+echo "Using AWS Region: ${AWS_REGION}"
+
 # AWS credentials handling
 # If AWS_PROFILE is set, use it
 if [ -n "${AWS_PROFILE:-}" ]; then
@@ -63,11 +116,19 @@ elif is_github_actions; then
 # Otherwise, check for explicit environment variables
 elif [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
     echo "Using AWS credentials from environment variables"
-    validate_aws_credentials
+    if ! validate_aws_credentials; then
+        echo "Failed to validate AWS credentials. Please check your AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+        exit 1
+    fi
+    echo "AWS credentials validated successfully"
 # Finally, try default profile
 else
     echo "Using default AWS profile"
-    validate_aws_credentials
+    if ! validate_aws_credentials; then
+        echo "Failed to validate AWS credentials. Please configure AWS CLI or provide credentials"
+        exit 1
+    fi
+    echo "AWS credentials validated successfully"
 fi
 
 # Get AWS account ID and region
@@ -75,13 +136,6 @@ if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
     AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --no-cli-pager)
 fi
 
-if [ -z "${AWS_REGION:-}" ]; then
-    AWS_REGION=$(aws configure get region)
-    if [ -z "${AWS_REGION}" ]; then
-        echo "Please set AWS_REGION environment variable or configure it in your AWS profile"
-        exit 1
-    fi
-fi
 
 # ECR registry URL
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
