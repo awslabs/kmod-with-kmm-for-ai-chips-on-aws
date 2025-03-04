@@ -28,9 +28,14 @@ if [ ! -f "${QUAY_AUTH_FILE}" ]; then
 fi
 
 # Check if required environment variables are set
-if [ -z "${ECR_REPOSITORY_NAME:-}" ]; then
-    echo "Please set ECR_REPOSITORY_NAME environment variable"
-    exit 1
+if [ -z "${DTK_ECR_REPOSITORY_NAME:-}" ]; then
+    # Backward compatibility: use ECR_REPOSITORY_NAME if DTK_ECR_REPOSITORY_NAME is not set
+    DTK_ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME:-}"
+    
+    if [ -z "${DTK_ECR_REPOSITORY_NAME}" ]; then
+        echo "Please set DTK_ECR_REPOSITORY_NAME (or legacy ECR_REPOSITORY_NAME) environment variable"
+        exit 1
+    fi
 fi
 
 # If AWS_PROFILE is set, use it
@@ -72,14 +77,14 @@ echo "Logging into ECR..."
 aws ecr get-login-password --region "${AWS_REGION}" --no-cli-pager | podman login --username AWS --password-stdin "${ECR_REGISTRY}"
 
 # Check if repository exists (suppress output)
-if ! aws ecr describe-repositories --repository-names "${ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
-    echo "Error: ECR repository ${ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
+if ! aws ecr describe-repositories --repository-names "${DTK_ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
+    echo "Error: ECR repository ${DTK_ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
     echo "Please create the repository before running this script"
     exit 1
 fi
 
 # Output to which ECR repository and region we going to upload the dtk images
-echo "Syncing to ECR repository ${ECR_REPOSITORY_NAME} in region ${AWS_REGION}"
+echo "Syncing to ECR repository ${DTK_ECR_REPOSITORY_NAME} in region ${AWS_REGION}"
 
 # Read and process the JSON file
 jq -c '.[]' driver-toolkit.json | while read -r item; do
@@ -91,7 +96,7 @@ jq -c '.[]' driver-toolkit.json | while read -r item; do
     
     # Check if image with this SHA already exists in ECR
     if ! aws ecr describe-images \
-        --repository-name "${ECR_REPOSITORY_NAME}" \
+        --repository-name "${DTK_ECR_REPOSITORY_NAME}" \
         --image-ids imageTag="${version}" \
         --no-cli-pager >/dev/null 2>&1; then
         
@@ -102,7 +107,7 @@ jq -c '.[]' driver-toolkit.json | while read -r item; do
         fi
         
         # Tag the image for ECR
-        ecr_tag="${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${version}"
+        ecr_tag="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
         podman tag "${dtk_image}" "${ecr_tag}" >/dev/null 2>&1
         
         echo "Pushing image to ECR with tag ${version}..."
@@ -114,7 +119,7 @@ jq -c '.[]' driver-toolkit.json | while read -r item; do
 
         # Get the new SHA from ECR
         ecr_sha=$(aws ecr describe-images \
-            --repository-name "${ECR_REPOSITORY_NAME}" \
+            --repository-name "${DTK_ECR_REPOSITORY_NAME}" \
             --image-ids imageTag="${version}" \
             --query 'imageDetails[0].imageDigest' \
             --output text \

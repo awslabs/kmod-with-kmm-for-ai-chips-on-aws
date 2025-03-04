@@ -53,10 +53,15 @@ Syncs Driver Toolkit images from Quay.io to a private AWS ECR repository.
 
 ### Usage
 
-Only required configuration is the ECR repository name:
+Configuration options:
 
 ```bash
+# Legacy configuration (still supported)
 export ECR_REPOSITORY_NAME="your-repository-name"
+./dtk-sync-to-ecr.sh
+
+# New configuration with dedicated DTK repository
+export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 ./dtk-sync-to-ecr.sh
 ```
 
@@ -68,7 +73,7 @@ The script supports multiple authentication methods:
 
 ```bash
 export AWS_PROFILE="your-profile-name"
-export ECR_REPOSITORY_NAME="your-repository-name"
+export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 ./dtk-sync-to-ecr.sh
 ```
 
@@ -78,7 +83,7 @@ export ECR_REPOSITORY_NAME="your-repository-name"
 ```bash
 export AWS_ACCESS_KEY_ID="your-key"
 export AWS_SECRET_ACCESS_KEY="your-secret"
-export ECR_REPOSITORY_NAME="your-repository-name"
+export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 # Optional: Override region from AWS config
 export AWS_REGION="your-region"
 ./dtk-sync-to-ecr.sh
@@ -88,7 +93,7 @@ export AWS_REGION="your-region"
 
 ```bash
 # Uses credentials and region from ~/.aws/config
-export ECR_REPOSITORY_NAME="your-repository-name"
+export DTK_ECR_REPOSITORY_NAME="your-dtk-repository-name"
 ./dtk-sync-to-ecr.sh
 ```
 

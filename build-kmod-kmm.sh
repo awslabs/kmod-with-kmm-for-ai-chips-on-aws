@@ -86,9 +86,20 @@ NEURON_DRIVER_VERSION="$1"
 OCP_VERSION="${2:-}"  # Optional parameter
 
 # Check if required environment variables are set
-if [ -z "${ECR_REPOSITORY_NAME:-}" ]; then
-    echo "Please set ECR_REPOSITORY_NAME environment variable"
-    exit 1
+if [ -z "${KMOD_ECR_REPOSITORY_NAME:-}" ]; then
+    # Backward compatibility: use ECR_REPOSITORY_NAME if KMOD_ECR_REPOSITORY_NAME is not set
+    KMOD_ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME:-}"
+    
+    if [ -z "${KMOD_ECR_REPOSITORY_NAME}" ]; then
+        echo "Please set KMOD_ECR_REPOSITORY_NAME (or legacy ECR_REPOSITORY_NAME) environment variable"
+        exit 1
+    fi
+fi
+
+# Set DTK repository name with fallback to KMOD_ECR_REPOSITORY_NAME for backward compatibility
+if [ -z "${DTK_ECR_REPOSITORY_NAME:-}" ]; then
+    DTK_ECR_REPOSITORY_NAME="${KMOD_ECR_REPOSITORY_NAME}"
+    echo "DTK_ECR_REPOSITORY_NAME not set, using ${DTK_ECR_REPOSITORY_NAME} for driver toolkit images"
 fi
 
 if [ -z "${AWS_REGION:-}" ]; then
@@ -183,7 +194,7 @@ while IFS= read -r entry; do
     fi
     
     # Get DTK image from ECR
-    dtk_ecr_image="${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${version}"
+    dtk_ecr_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
     
     echo "Processing OCP version: ${version}"
     
@@ -224,23 +235,23 @@ while IFS= read -r entry; do
         --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
         --build-arg OCP_VERSION="${version}" \
         -f "${SCRIPT_DIR}/container/Containerfile" \
-        -t "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}" \
+        -t "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" \
         --iidfile "${TEMP_DIR}/image.id" \
         "${OUTPUT_DIR}"
     
     # Add the base tag as well
     IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-    podman tag "${IMAGE_ID}" "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${BASE_TAG}"
+    podman tag "${IMAGE_ID}" "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
     
     # Push images
     echo "Pushing images to ECR..."
-    podman push "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}"
-    podman push "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${BASE_TAG}"
+    podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}"
+    podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
     
     # Clean up this version's container images
     echo "Cleaning up container images..."
-    podman rmi "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
-    podman rmi "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
+    podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
+    podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
     podman rmi "${IMAGE_ID}" || true
     
     # Clean the output directory for the next build
