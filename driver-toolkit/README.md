@@ -1,5 +1,39 @@
 # Driver Toolkit
 
+## Authentication for Quay.io Repository
+
+The Driver Toolkit images are hosted in a private Quay.io repository that is only accessible to Red Hat OpenShift customers. To access these images, you'll need to:
+
+1. Obtain a pull secret from the Red Hat OpenShift Console:
+   - Visit https://cloud.redhat.com/openshift/install/pull-secret
+   - Log in with your Red Hat account
+   - Download the pull secret file
+
+2. Configure your container tool (podman/docker) to use the pull secret:
+   ```bash
+   # For podman
+   mkdir -p ~/.config/containers/
+   cp /path/to/pull-secret.json ~/.config/containers/auth.json
+   
+   # For docker
+   mkdir -p ~/.docker
+   cp /path/to/pull-secret.json ~/.docker/config.json
+   ```
+
+3. Alternatively, you can use the pull secret via environment variables:
+   ```bash
+   # Standard Podman environment variable
+   export REGISTRY_AUTH_FILE=/path/to/pull-secret.json
+   
+   # Custom environment variable used by dtk-sync-to-ecr.sh script
+   export QUAY_AUTH_FILE=/path/to/pull-secret.json
+   ```
+   
+   Note: The `dtk-sync-to-ecr.sh` script specifically requires the `QUAY_AUTH_FILE`
+   environment variable to be set, pointing to your Quay.io authentication file.
+
+Without this authentication, you will not be able to access the Driver Toolkit images from Quay.io.
+
 ## driver-toolkit.sh
 
 This script is designed to gather and catalog OpenShift driver toolkit information across 
