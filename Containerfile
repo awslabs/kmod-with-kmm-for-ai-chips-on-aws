@@ -35,18 +35,17 @@ RUN echo "Checking version ${NEURON_DRIVER_VERSION} against 2.18.12.0" && \
         echo "Version does not require patching"; \
     fi
 
+# Can probably be removed, to be verified later.
 # Split the Makefile patching into its own layer
 RUN if [ $(echo "${NEURON_DRIVER_VERSION} 2.18.12.0" | tr " " "\n" | sort -V | head -n 1) != "2.18.12.0" ]; then \
         echo "Patching Makefile..." && \
-        sed -i "s/\$(shell uname -r)/$(cat /kernel_version.ver)/g" Makefile && \
-        cat Makefile; \
+        sed -i "s/\$(shell uname -r)/$(cat /kernel_version.ver)/g" Makefile; \
     fi
 
 # Split the neuron_cdev.c patching into its own layer
 RUN if [ $(echo "${NEURON_DRIVER_VERSION} 2.18.12.0" | tr " " "\n" | sort -V | head -n 1) != "2.18.12.0" ]; then \
         echo "Patching neuron_cdev.c..." && \
-        sed -i "s/KERNEL_VERSION(6, 4, 0)/KERNEL_VERSION(5, 14, 0)/g" neuron_cdev.c && \
-        cat neuron_cdev.c; \
+        sed -i "s/KERNEL_VERSION(6, 4, 0)/KERNEL_VERSION(5, 14, 0)/g" neuron_cdev.c; \
     fi
 
 # Make command in its own layer
@@ -58,13 +57,25 @@ RUN echo "Building kernel module..." && \
 # Final image
 FROM alpine
 
+# Redeclare ARG in this stage
+ARG OCP_VERSION
+
+# Install needed tools
+RUN apk add --no-cache kmod
+
 COPY --from=build /kernel_version.ver /kernel_version.ver
-RUN mkdir -p /opt/lib/modules/$(cat /kernel_version.ver)/kernel/drivers/neuron
-COPY --from=build /aws-neuron-driver/neuron.ko /opt/lib/modules/$(cat /kernel_version.ver)/kernel/drivers/neuron/neuron.ko
-RUN depmod -b /opt
+# Now use the saved kernel version
+RUN KERNEL_VERSION=$(cat /kernel_version.ver) && \
+    mkdir -p /opt/lib/modules/${KERNEL_VERSION}/kernel/drivers/neuron && \
+    echo ${KERNEL_VERSION} > /kernel_version
+
+COPY --from=build /aws-neuron-driver/neuron.ko /opt/lib/modules/${KERNEL_VERSION}/kernel/drivers/neuron/neuron.ko
+RUN KERNEL_VERSION=$(cat /kernel_version) && \
+    echo "Kernel version: ${KERNEL_VERSION}" && \
+    echo "Contents of /opt/lib/modules:" && \
+    ls -la /opt/lib/modules && \
+    depmod -b /opt ${KERNEL_VERSION}
 
 # Add kernel version label to final image
-ARG KERNEL_VERSION=$(cat /kernel_version.env)
-ARG OCP_VERSION
-LABEL kernel-version=$KERNEL_VERSION \
+LABEL kernel-version=$(cat /kernel_version) \
       ocp-version=$OCP_VERSION
