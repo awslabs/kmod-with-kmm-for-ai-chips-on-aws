@@ -159,7 +159,10 @@ echo "Cloning AWS Neuron driver repository..."
 TEMP_DIR=$(mktemp -d)
 git clone https://github.com/wombelix/aws-neuron-driver.git "${TEMP_DIR}/aws-neuron-driver"
 cd "${TEMP_DIR}/aws-neuron-driver"
-git checkout ${NEURON_DRIVER_VERSION}
+# Suppress detached HEAD advice
+git config --global advice.detachedHead false
+git checkout --quiet ${NEURON_DRIVER_VERSION}
+cd ${SCRIPT_DIR}
 
 # Create output directory for all builds
 OUTPUT_DIR="${TEMP_DIR}/output"
@@ -220,7 +223,7 @@ while IFS= read -r entry; do
         --platform=linux/amd64 \
         --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
         --build-arg OCP_VERSION="${version}" \
-        -f "$(dirname "$0")/container/Containerfile" \
+        -f "${SCRIPT_DIR}/container/Containerfile" \
         -t "${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${FULL_TAG}" \
         --iidfile "${TEMP_DIR}/image.id" \
         "${OUTPUT_DIR}"
@@ -243,7 +246,7 @@ while IFS= read -r entry; do
     # Clean the output directory for the next build
     rm -f "${OUTPUT_DIR}/neuron.ko"
     
-done < <(jq -c '.[]' "$(dirname "$0")/driver-toolkit/driver-toolkit.json")
+done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 
 # Final cleanup
 echo "Cleaning up temporary directory..."
