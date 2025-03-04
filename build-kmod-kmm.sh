@@ -201,7 +201,7 @@ while IFS= read -r entry; do
     # Build kernel module
     echo "Building kernel module for kernel ${KERNEL_VERSION}..."
     podman run --rm \
-        -v "${TEMP_DIR}/aws-neuron-driver:/aws-neuron-driver:Z" \
+        -v "${TEMP_DIR}/aws-neuron-driver/src:/aws-neuron-driver:Z" \
         -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
         -v "${OUTPUT_DIR}:/output:Z" \
         ${dtk_ecr_image} \
