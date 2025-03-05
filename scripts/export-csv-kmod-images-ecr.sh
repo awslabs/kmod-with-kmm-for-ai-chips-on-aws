@@ -31,12 +31,13 @@ jq -r '
     ($tags[] | select(contains("kernel") | not)) as $base |
     ($tags[] | select(contains("kernel"))) as $full |
     if $base and $full then
-        [$base, $full] | @csv
+        [$base, $full, "\($base)"] | @csv
     else
         empty
     end
 ' | sort -V | while read -r line; do
-    echo "$line,${REGISTRY}/${REPOSITORY}:$(echo $line | cut -d',' -f1)" >> kmod_images_ecr.csv
+    base_tag=$(echo $line | cut -d',' -f3 | tr -d '"')
+    echo "${line%,*},\"${REGISTRY}/${REPOSITORY}:${base_tag}\"" >> kmod_images_ecr.csv
     echo "Added: $(echo $line | cut -d',' -f1)"
 done
 
