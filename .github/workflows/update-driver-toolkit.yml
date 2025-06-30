@@ -25,13 +25,12 @@ jobs:
         sudo mv oc /usr/local/bin/
         sudo chmod +x /usr/local/bin/oc
         
-    - name: Setup Podman auth
-      env:
-        QUAY_AUTH_CONFIG: ${{ secrets.QUAY_AUTH_CONFIG }}
-      run: |
-        mkdir -p ~/.config/containers
-        printf '%s' "$QUAY_AUTH_CONFIG" > ~/.config/containers/auth.json
-        chmod 600 ~/.config/containers/auth.json
+    - name: Login to Quay.io
+      uses: redhat-actions/podman-login@v1
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_PASSWORD }}
         
     - name: Generate driver toolkit JSON
       env:
@@ -52,11 +51,6 @@ jobs:
           echo "changes=false" >> $GITHUB_OUTPUT
           rm driver-toolkit.json.new
         fi
-        
-    - name: Cleanup auth
-      if: always()
-      run: |
-        rm -f ~/.config/containers/auth.json
         
     - name: Create or Update Pull Request
       if: steps.check_changes.outputs.changes == 'true'
