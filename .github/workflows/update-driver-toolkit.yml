@@ -52,9 +52,9 @@ jobs:
         
     - name: Create or Update Pull Request
       if: steps.check_changes.outputs.changes == 'true'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@v7
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        branch-token: ${{ secrets.GITHUB_TOKEN }}
         commit-message: 'feat: update driver-toolkit.json with latest OpenShift releases'
         title: 'feat: update driver-toolkit.json with latest releases'
         body: |
