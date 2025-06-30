@@ -26,9 +26,12 @@ jobs:
         sudo chmod +x /usr/local/bin/oc
         
     - name: Setup Podman auth
+      env:
+        QUAY_AUTH_CONFIG: ${{ secrets.QUAY_AUTH_CONFIG }}
       run: |
         mkdir -p ~/.config/containers
-        echo '${{ secrets.QUAY_AUTH_CONFIG }}' > ~/.config/containers/auth.json
+        printf '%s' "$QUAY_AUTH_CONFIG" > ~/.config/containers/auth.json
+        chmod 600 ~/.config/containers/auth.json
         
     - name: Generate driver toolkit JSON
       env:
@@ -49,6 +52,11 @@ jobs:
           echo "changes=false" >> $GITHUB_OUTPUT
           rm driver-toolkit.json.new
         fi
+        
+    - name: Cleanup auth
+      if: always()
+      run: |
+        rm -f ~/.config/containers/auth.json
         
     - name: Create or Update Pull Request
       if: steps.check_changes.outputs.changes == 'true'
