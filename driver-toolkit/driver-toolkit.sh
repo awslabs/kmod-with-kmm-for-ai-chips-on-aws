@@ -27,12 +27,10 @@ check_command() {
     fi
 }
 
-# Check for required commands (skip in CI)
-if [ "$CI" != "true" ]; then
-    for cmd in curl jq oc; do
-        check_command "$cmd"
-    done
-fi
+# Check for required commands
+for cmd in curl jq oc; do
+    check_command "$cmd"
+done
 
 # Start with a temporary file
 temp_json=$(mktemp)
