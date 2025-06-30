@@ -27,10 +27,12 @@ check_command() {
     fi
 }
 
-# Check for required commands
-for cmd in curl jq oc; do
-    check_command "$cmd"
-done
+# Check for required commands (skip in CI)
+if [ "$CI" != "true" ]; then
+    for cmd in curl jq oc; do
+        check_command "$cmd"
+    done
+fi
 
 # Start with a temporary file
 temp_json=$(mktemp)
@@ -92,7 +94,8 @@ echo >> "$temp_json"
 echo "]" >> "$temp_json"
 
 # Sort the entire JSON array by version and write to final file
-jq -S 'sort_by(.version | split(".") | map(tonumber))' "$temp_json" > driver-toolkit.json
+output_file="${OUTPUT_FILE:-driver-toolkit.json}"
+jq -S 'sort_by(.version | split(".") | map(tonumber))' "$temp_json" > "$output_file"
 
 # Clean up
 rm "$temp_json"

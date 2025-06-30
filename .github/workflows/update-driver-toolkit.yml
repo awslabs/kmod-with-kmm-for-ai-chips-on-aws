@@ -31,60 +31,12 @@ jobs:
         echo '${{ secrets.QUAY_AUTH_CONFIG }}' > ~/.config/containers/auth.json
         
     - name: Generate driver toolkit JSON
+      env:
+        CI: true
+        OUTPUT_FILE: driver-toolkit.json.new
       run: |
         cd driver-toolkit
-        temp_json=$(mktemp)
-        echo "[" > "$temp_json"
-        
-        first_entry=true
-        for major in 4; do
-          for minor in {16..19}; do
-            page=1
-            while true; do
-              response=$(curl -s "https://quay.io/api/v1/repository/openshift-release-dev/ocp-release/tag/?onlyActiveTags=true&filter_tag_name=like:${major}.${minor}.&page=$page&limit=100")
-              
-              tags_count=$(echo "$response" | jq '.tags | length')
-              if [ "$tags_count" -eq 0 ] || [ "$tags_count" = "null" ]; then
-                break
-              fi
-              
-              while read -r version; do
-                [ -z "$version" ] && continue
-                
-                version_num=${version%-x86_64}
-                arch=${version#*-}
-                
-                echo "Processing: ${version_num} (${arch})"
-                
-                dtk=$(oc adm release info "quay.io/openshift-release-dev/ocp-release:${version}" --image-for=driver-toolkit)
-                
-                entry=$(jq -c -n \
-                  --arg version "$version_num" \
-                  --arg arch "$arch" \
-                  --arg dtk "$dtk" \
-                  '{version: $version, arch: $arch, dtk: $dtk}')
-                
-                if [ "$first_entry" = true ]; then
-                  first_entry=false
-                  echo "$entry" >> "$temp_json"
-                else
-                  echo ",$entry" >> "$temp_json"
-                fi
-                
-              done < <(echo "$response" | \
-                jq -r '.tags[] | select(.name | test("^4\\.[0-9]+\\.[0-9]+-x86_64$")) | .name' | \
-                sort -V)
-              
-              ((page++))
-            done
-          done
-        done
-        
-        echo >> "$temp_json"
-        echo "]" >> "$temp_json"
-        
-        jq -S 'sort_by(.version | split(".") | map(tonumber))' "$temp_json" > driver-toolkit.json.new
-        rm "$temp_json"
+        ./driver-toolkit.sh
         
     - name: Check for changes
       id: check_changes
