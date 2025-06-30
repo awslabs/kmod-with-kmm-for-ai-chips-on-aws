@@ -1,0 +1,115 @@
+name: Update Driver Toolkit
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC
+  workflow_dispatch:
+
+jobs:
+  update-driver-toolkit:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl
+        
+    - name: Install OpenShift CLI
+      run: |
+        curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+        tar -xzf openshift-client-linux.tar.gz
+        sudo mv oc /usr/local/bin/
+        sudo chmod +x /usr/local/bin/oc
+        
+    - name: Setup Podman auth
+      run: |
+        mkdir -p ~/.config/containers
+        echo '${{ secrets.QUAY_AUTH_CONFIG }}' > ~/.config/containers/auth.json
+        
+    - name: Generate driver toolkit JSON
+      run: |
+        cd driver-toolkit
+        temp_json=$(mktemp)
+        echo "[" > "$temp_json"
+        
+        first_entry=true
+        for major in 4; do
+          for minor in {16..19}; do
+            page=1
+            while true; do
+              response=$(curl -s "https://quay.io/api/v1/repository/openshift-release-dev/ocp-release/tag/?onlyActiveTags=true&filter_tag_name=like:${major}.${minor}.&page=$page&limit=100")
+              
+              tags_count=$(echo "$response" | jq '.tags | length')
+              if [ "$tags_count" -eq 0 ] || [ "$tags_count" = "null" ]; then
+                break
+              fi
+              
+              while read -r version; do
+                [ -z "$version" ] && continue
+                
+                version_num=${version%-x86_64}
+                arch=${version#*-}
+                
+                echo "Processing: ${version_num} (${arch})"
+                
+                dtk=$(oc adm release info "quay.io/openshift-release-dev/ocp-release:${version}" --image-for=driver-toolkit)
+                
+                entry=$(jq -c -n \
+                  --arg version "$version_num" \
+                  --arg arch "$arch" \
+                  --arg dtk "$dtk" \
+                  '{version: $version, arch: $arch, dtk: $dtk}')
+                
+                if [ "$first_entry" = true ]; then
+                  first_entry=false
+                  echo "$entry" >> "$temp_json"
+                else
+                  echo ",$entry" >> "$temp_json"
+                fi
+                
+              done < <(echo "$response" | \
+                jq -r '.tags[] | select(.name | test("^4\\.[0-9]+\\.[0-9]+-x86_64$")) | .name' | \
+                sort -V)
+              
+              ((page++))
+            done
+          done
+        done
+        
+        echo >> "$temp_json"
+        echo "]" >> "$temp_json"
+        
+        jq -S 'sort_by(.version | split(".") | map(tonumber))' "$temp_json" > driver-toolkit.json.new
+        rm "$temp_json"
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        cd driver-toolkit
+        if ! cmp -s driver-toolkit.json driver-toolkit.json.new; then
+          echo "changes=true" >> $GITHUB_OUTPUT
+          mv driver-toolkit.json.new driver-toolkit.json
+        else
+          echo "changes=false" >> $GITHUB_OUTPUT
+          rm driver-toolkit.json.new
+        fi
+        
+    - name: Create Pull Request
+      if: steps.check_changes.outputs.changes == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'Update driver-toolkit.json with latest OpenShift releases'
+        title: 'Update driver-toolkit.json'
+        body: |
+          This PR updates the driver-toolkit.json file with the latest OpenShift release information.
+          
+          Changes detected in driver toolkit mappings for OpenShift versions 4.16-4.19.
+          
+          Please review and merge if the changes look correct.
+        branch: update-driver-toolkit
+        delete-branch: true
