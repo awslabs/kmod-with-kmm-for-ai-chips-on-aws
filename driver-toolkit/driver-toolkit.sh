@@ -92,7 +92,8 @@ echo >> "$temp_json"
 echo "]" >> "$temp_json"
 
 # Sort the entire JSON array by version and write to final file
-jq -S 'sort_by(.version | split(".") | map(tonumber))' "$temp_json" > driver-toolkit.json
+output_file="${OUTPUT_FILE:-driver-toolkit.json}"
+jq -S 'sort_by(.version | split(".") | map(tonumber))' "$temp_json" > "$output_file"
 
 # Clean up
 rm "$temp_json"
