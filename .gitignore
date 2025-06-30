@@ -1,1 +1,17 @@
 kmod_images_ecr.csv
+
+# Binaries and installation files
+*.tar.gz
+oc
+kubectl
+openshift-client-*
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Secrets and auth files
+*.json.auth
+auth.json
+.config/containers/auth.json

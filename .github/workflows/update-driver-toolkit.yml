@@ -24,6 +24,8 @@ jobs:
         tar -xzf openshift-client-linux.tar.gz
         sudo mv oc /usr/local/bin/
         sudo chmod +x /usr/local/bin/oc
+        # Clean up installation files
+        rm -f openshift-client-linux.tar.gz kubectl oc
         
 
     - name: Generate driver toolkit JSON
