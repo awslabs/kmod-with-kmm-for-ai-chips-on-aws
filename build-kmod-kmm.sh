@@ -110,77 +110,80 @@ if [ "${FORCE_BUILD}" = "true" ]; then
     echo "FORCE_BUILD is set to true, will rebuild images even if they already exist"
 fi
 
-# Check if required environment variables are set
-if [ -z "${KMOD_ECR_REPOSITORY_NAME:-}" ]; then
-    # Use default repository name if not set
-    KMOD_ECR_REPOSITORY_NAME="neuron-operator/kmod"
-    echo "Using default repository name: ${KMOD_ECR_REPOSITORY_NAME}"
-fi
-
-# Set DTK repository name with default value
-if [ -z "${DTK_ECR_REPOSITORY_NAME:-}" ]; then
-    DTK_ECR_REPOSITORY_NAME="neuron-operator/driver-toolkit"
-    echo "DTK_ECR_REPOSITORY_NAME not set, using default: ${DTK_ECR_REPOSITORY_NAME}"
-fi
-
-if [ -z "${AWS_REGION:-}" ]; then
-    AWS_REGION=$(aws configure get region || echo "")
-    if [ -z "${AWS_REGION}" ]; then
-        echo "Error: AWS_REGION is not set and couldn't be retrieved from AWS configuration"
-        echo "Please either:"
-        echo "  - Set AWS_REGION environment variable"
-        echo "  - Configure a default region with 'aws configure'"
-        echo "  - Or specify a region in your AWS profile"
+# AWS/ECR setup (skip in GitHub Actions)
+if ! is_github_actions; then
+    echo "Setting up AWS/ECR environment for local development..."
+    
+    # Check if required environment variables are set
+    if [ -z "${KMOD_ECR_REPOSITORY_NAME:-}" ]; then
+        # Use default repository name if not set
+        KMOD_ECR_REPOSITORY_NAME="neuron-operator/kmod"
+        echo "Using default repository name: ${KMOD_ECR_REPOSITORY_NAME}"
+    fi
+    
+    # Set DTK repository name with default value
+    if [ -z "${DTK_ECR_REPOSITORY_NAME:-}" ]; then
+        DTK_ECR_REPOSITORY_NAME="neuron-operator/driver-toolkit"
+        echo "DTK_ECR_REPOSITORY_NAME not set, using default: ${DTK_ECR_REPOSITORY_NAME}"
+    fi
+    
+    if [ -z "${AWS_REGION:-}" ]; then
+        AWS_REGION=$(aws configure get region || echo "")
+        if [ -z "${AWS_REGION}" ]; then
+            echo "Error: AWS_REGION is not set and couldn't be retrieved from AWS configuration"
+            echo "Please either:"
+            echo "  - Set AWS_REGION environment variable"
+            echo "  - Configure a default region with 'aws configure'"
+            echo "  - Or specify a region in your AWS profile"
+            exit 1
+        fi
+    fi
+    echo "Using AWS Region: ${AWS_REGION}"
+    
+    # AWS credentials handling
+    # If AWS_PROFILE is set, use it
+    if [ -n "${AWS_PROFILE:-}" ]; then
+        echo "Using AWS profile: ${AWS_PROFILE}"
+        validate_aws_credentials
+    # Otherwise, check for explicit environment variables
+    elif [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        echo "Using AWS credentials from environment variables"
+        if ! validate_aws_credentials; then
+            echo "Failed to validate AWS credentials. Please check your AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+            exit 1
+        fi
+        echo "AWS credentials validated successfully"
+    # Finally, try default profile
+    else
+        echo "Using default AWS profile"
+        if ! validate_aws_credentials; then
+            echo "Failed to validate AWS credentials. Please configure AWS CLI or provide credentials"
+            exit 1
+        fi
+        echo "AWS credentials validated successfully"
+    fi
+    
+    # Get AWS account ID and region
+    if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --no-cli-pager)
+    fi
+    
+    # ECR registry URL
+    ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    
+    # Authenticate with ECR
+    echo "Logging into ECR..."
+    aws ecr get-login-password --region "${AWS_REGION}" --no-cli-pager | \
+        podman login --username AWS --password-stdin "${ECR_REGISTRY}"
+    
+    # Check if repository exists (suppress output)
+    if ! aws ecr describe-repositories --repository-names "${KMOD_ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
+        echo "Error: ECR repository ${KMOD_ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
+        echo "Please create the repository before running this script"
         exit 1
     fi
-fi
-echo "Using AWS Region: ${AWS_REGION}"
-
-# AWS credentials handling
-# If AWS_PROFILE is set, use it
-if [ -n "${AWS_PROFILE:-}" ]; then
-    echo "Using AWS profile: ${AWS_PROFILE}"
-    validate_aws_credentials
-# If running in GitHub Actions, assume credentials are handled via OIDC
-elif is_github_actions; then
-    echo "Running in GitHub Actions, using OIDC credentials"
-    validate_aws_credentials
-# Otherwise, check for explicit environment variables
-elif [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-    echo "Using AWS credentials from environment variables"
-    if ! validate_aws_credentials; then
-        echo "Failed to validate AWS credentials. Please check your AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
-        exit 1
-    fi
-    echo "AWS credentials validated successfully"
-# Finally, try default profile
 else
-    echo "Using default AWS profile"
-    if ! validate_aws_credentials; then
-        echo "Failed to validate AWS credentials. Please configure AWS CLI or provide credentials"
-        exit 1
-    fi
-    echo "AWS credentials validated successfully"
-fi
-
-# Get AWS account ID and region
-if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --no-cli-pager)
-fi
-
-# ECR registry URL
-ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-# Authenticate with ECR
-echo "Logging into ECR..."
-aws ecr get-login-password --region "${AWS_REGION}" --no-cli-pager | \
-    podman login --username AWS --password-stdin "${ECR_REGISTRY}"
-
-# Check if repository exists (suppress output)
-if ! aws ecr describe-repositories --repository-names "${KMOD_ECR_REPOSITORY_NAME}" --no-cli-pager >/dev/null 2>&1; then
-    echo "Error: ECR repository ${KMOD_ECR_REPOSITORY_NAME} does not exist in ${AWS_REGION}"
-    echo "Please create the repository before running this script"
-    exit 1
+    echo "Running in GitHub Actions, skipping AWS/ECR setup"
 fi
 
 # Store the original script directory before changing directories
