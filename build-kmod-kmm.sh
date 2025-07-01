@@ -87,6 +87,51 @@ image_exists_in_ecr() {
     return $?
 }
 
+# Function to build kernel module for a specific OCP version
+build_kernel_module_for_version() {
+    local version="$1"
+    local dtk_image="$2"
+    
+    echo "Processing OCP version: ${version}"
+    
+    # Pull the DTK image
+    echo "Pulling DTK image: ${dtk_image}"
+    podman pull ${dtk_image} >/dev/null
+    
+    # Get the image ID of the DTK image for later cleanup - using a more reliable method
+    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' ${dtk_image} 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
+    echo "DTK Image ID: ${DTK_IMAGE_ID}"
+    
+    # Extract kernel version from DTK container
+    echo "Extracting kernel version from DTK image..."
+    KERNEL_VERSION=$(podman run --rm ${dtk_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
+    
+    if [ -z "${KERNEL_VERSION}" ]; then
+        echo "Error: Failed to extract kernel version from DTK image"
+        return 1
+    fi
+    
+    echo "Detected kernel version: ${KERNEL_VERSION}"
+    
+    # Build kernel module
+    echo "Building kernel module for kernel ${KERNEL_VERSION}..."
+    podman run --rm \
+        -v "${TEMP_DIR}/aws-neuron-driver/src:/aws-neuron-driver:Z" \
+        -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
+        -v "${OUTPUT_DIR}:/output:Z" \
+        ${dtk_image} \
+        /build-module.sh "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}"
+    
+    # Check if build was successful
+    if [ ! -f "${OUTPUT_DIR}/neuron.ko" ]; then
+        echo "Error: Failed to build neuron.ko"
+        return 1
+    fi
+    
+    # Return success - kernel version and DTK_IMAGE_ID are set as global variables
+    return 0
+}
+
 # Configuration
 if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "Usage: $0 DRIVER_VERSION [OCP_VERSION]"
@@ -207,116 +252,110 @@ mkdir -p "${OUTPUT_DIR}"
 cp "${SCRIPT_DIR}/container/build-module.sh" "${TEMP_DIR}/"
 chmod +x "${TEMP_DIR}/build-module.sh"
 
-# Process driver-toolkit.json
-echo "Processing driver-toolkit.json..."
-while IFS= read -r entry; do
-    version=$(echo "$entry" | jq -r '.version')
+# Build execution - different paths for GitHub Actions vs Local/Dev
+if is_github_actions; then
+    echo "GitHub Actions mode: Processing specific OCP version..."
     
-    # Skip if OCP_VERSION is set and version doesn't match the filter
-    if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
-        continue
+    # Get DTK image from driver-toolkit.json
+    dtk_image=$(jq -r ".[] | select(.version==\"$OCP_VERSION\") | .dtk" "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    if [ -z "$dtk_image" ] || [ "$dtk_image" = "null" ]; then
+        echo "Error: No DTK image found for OCP version $OCP_VERSION in driver-toolkit.json"
+        exit 1
     fi
     
-    # Create base tag for this version
-    BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
-    
-    # Check if image with this tag already exists in ECR
-    if [ "${FORCE_BUILD}" != "true" ] && image_exists_in_ecr "${KMOD_ECR_REPOSITORY_NAME}" "${BASE_TAG}"; then
-        echo "Image with tag ${BASE_TAG} already exists in ECR, skipping build..."
-        continue
-    fi
-    
-    # Get DTK image - from Quay.io in GitHub Actions, from ECR locally
-    if is_github_actions; then
-        dtk_image=$(jq -r ".[] | select(.version==\"$version\") | .dtk" "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
-        if [ -z "$dtk_image" ] || [ "$dtk_image" = "null" ]; then
-            echo "Error: No DTK image found for OCP version $version in driver-toolkit.json"
-            continue
-        fi
+    # Build kernel module for the specific version
+    if build_kernel_module_for_version "$OCP_VERSION" "$dtk_image"; then
+        echo "Build completed successfully for OCP version $OCP_VERSION"
+        # TODO: Add GitHub Actions specific post-processing (tagging, storage, etc.)
     else
-        dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
+        echo "Build failed for OCP version $OCP_VERSION"
+        exit 1
     fi
     
-    echo "Processing OCP version: ${version}"
-    
-    # Pull the DTK image
-    echo "Pulling DTK image: ${dtk_image}"
-    podman pull ${dtk_image} >/dev/null
-    
-    # Get the image ID of the DTK image for later cleanup - using a more reliable method
-    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' ${dtk_image} 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
-    echo "DTK Image ID: ${DTK_IMAGE_ID}"
-    
-    # Extract kernel version from DTK container
-    echo "Extracting kernel version from DTK image..."
-    KERNEL_VERSION=$(podman run --rm ${dtk_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
-    
-    if [ -z "${KERNEL_VERSION}" ]; then
-        echo "Error: Failed to extract kernel version from DTK image"
-        continue
-    fi
-    
-    echo "Detected kernel version: ${KERNEL_VERSION}"
-    
-    # Build kernel module
-    echo "Building kernel module for kernel ${KERNEL_VERSION}..."
-    podman run --rm \
-        -v "${TEMP_DIR}/aws-neuron-driver/src:/aws-neuron-driver:Z" \
-        -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
-        -v "${OUTPUT_DIR}:/output:Z" \
-        ${dtk_image} \
-        /build-module.sh "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}"
-    
-    # Check if build was successful
-    if [ ! -f "${OUTPUT_DIR}/neuron.ko" ]; then
-        echo "Error: Failed to build neuron.ko"
-        continue
-    fi
-    
-    # Create full tag with kernel version information
-    FULL_TAG="${BASE_TAG}-kernel${KERNEL_VERSION}"
-    
-    # Build final image
-    echo "Building final image with tag: ${FULL_TAG}"
-    podman build \
-        --platform=linux/amd64 \
-        --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
-        --build-arg OCP_VERSION="${version}" \
-        -f "${SCRIPT_DIR}/container/Containerfile" \
-        -t "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" \
-        --iidfile "${TEMP_DIR}/image.id" \
-        "${OUTPUT_DIR}"
-    
-    # Add the base tag as well
-    IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-    podman tag "${IMAGE_ID}" "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
-    
-    # Push images
-    echo "Pushing images to ECR..."
-    podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}"
-    podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
-    
-    # Clean up this version's container images
-    echo "Cleaning up container images..."
-    # First remove the tags
-    podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
-    podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
-    # Then remove the image by ID to ensure complete removal
-    podman rmi "${IMAGE_ID}" || true
-    
-    # Clean up the DTK image used for this build
+    # Clean up the DTK image
     echo "Cleaning up DTK image..."
-    # First remove the tag
     podman rmi "${dtk_image}" || true
-    # Then remove by ID to ensure complete removal
     if [ -n "${DTK_IMAGE_ID}" ]; then
         podman rmi "${DTK_IMAGE_ID}" || true
     fi
     
-    # Clean the output directory for the next build
+    # Clean the output directory
     rm -f "${OUTPUT_DIR}/neuron.ko"
     
-done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+else
+    echo "Local/Dev mode: Processing driver-toolkit.json..."
+    
+    while IFS= read -r entry; do
+        version=$(echo "$entry" | jq -r '.version')
+        
+        # Skip if OCP_VERSION is set and version doesn't match the filter
+        if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
+            continue
+        fi
+        
+        # Create base tag for this version
+        BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
+        
+        # Check if image with this tag already exists in ECR
+        if [ "${FORCE_BUILD}" != "true" ] && image_exists_in_ecr "${KMOD_ECR_REPOSITORY_NAME}" "${BASE_TAG}"; then
+            echo "Image with tag ${BASE_TAG} already exists in ECR, skipping build..."
+            continue
+        fi
+        
+        # Get DTK image from ECR
+        dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
+        
+        # Build kernel module for this version
+        if ! build_kernel_module_for_version "$version" "$dtk_image"; then
+            echo "Build failed for OCP version $version, continuing with next version..."
+            continue
+        fi
+        
+        # Create full tag with kernel version information
+        FULL_TAG="${BASE_TAG}-kernel${KERNEL_VERSION}"
+        
+        # Build final image
+        echo "Building final image with tag: ${FULL_TAG}"
+        podman build \
+            --platform=linux/amd64 \
+            --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
+            --build-arg OCP_VERSION="${version}" \
+            -f "${SCRIPT_DIR}/container/Containerfile" \
+            -t "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" \
+            --iidfile "${TEMP_DIR}/image.id" \
+            "${OUTPUT_DIR}"
+        
+        # Add the base tag as well
+        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
+        podman tag "${IMAGE_ID}" "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
+        
+        # Push images
+        echo "Pushing images to ECR..."
+        podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}"
+        podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
+        
+        # Clean up this version's container images
+        echo "Cleaning up container images..."
+        # First remove the tags
+        podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
+        podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
+        # Then remove the image by ID to ensure complete removal
+        podman rmi "${IMAGE_ID}" || true
+        
+        # Clean up the DTK image used for this build
+        echo "Cleaning up DTK image..."
+        # First remove the tag
+        podman rmi "${dtk_image}" || true
+        # Then remove by ID to ensure complete removal
+        if [ -n "${DTK_IMAGE_ID}" ]; then
+            podman rmi "${DTK_IMAGE_ID}" || true
+        fi
+        
+        # Clean the output directory for the next build
+        rm -f "${OUTPUT_DIR}/neuron.ko"
+        
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+fi
 
 # Final cleanup
 echo "Cleaning up temporary directory..."
