@@ -252,46 +252,33 @@ mkdir -p "${OUTPUT_DIR}"
 cp "${SCRIPT_DIR}/container/build-module.sh" "${TEMP_DIR}/"
 chmod +x "${TEMP_DIR}/build-module.sh"
 
-# Build execution - different paths for GitHub Actions vs Local/Dev
-if is_github_actions; then
-    echo "GitHub Actions mode: Processing specific OCP version..."
+# Process driver-toolkit.json with environment-specific logic
+echo "Processing driver-toolkit.json..."
+while IFS= read -r entry; do
+    version=$(echo "$entry" | jq -r '.version')
     
-    # Get DTK image from driver-toolkit.json
-    dtk_image=$(jq -r ".[] | select(.version==\"$OCP_VERSION\") | .dtk" "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
-    if [ -z "$dtk_image" ] || [ "$dtk_image" = "null" ]; then
-        echo "Error: No DTK image found for OCP version $OCP_VERSION in driver-toolkit.json"
-        exit 1
+    # Skip if OCP_VERSION is set and version doesn't match the filter
+    if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
+        continue
     fi
     
-    # Build kernel module for the specific version
-    if build_kernel_module_for_version "$OCP_VERSION" "$dtk_image"; then
-        echo "Build completed successfully for OCP version $OCP_VERSION"
-        # TODO: Add GitHub Actions specific post-processing (tagging, storage, etc.)
-    else
-        echo "Build failed for OCP version $OCP_VERSION"
-        exit 1
-    fi
-    
-    # Clean up the DTK image
-    echo "Cleaning up DTK image..."
-    podman rmi "${dtk_image}" || true
-    if [ -n "${DTK_IMAGE_ID}" ]; then
-        podman rmi "${DTK_IMAGE_ID}" || true
-    fi
-    
-    # Clean the output directory
-    rm -f "${OUTPUT_DIR}/neuron.ko"
-    
-else
-    echo "Local/Dev mode: Processing driver-toolkit.json..."
-    
-    while IFS= read -r entry; do
-        version=$(echo "$entry" | jq -r '.version')
+    if is_github_actions; then
+        echo "GitHub Actions: Processing OCP version $version"
         
-        # Skip if OCP_VERSION is set and version doesn't match the filter
-        if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
+        # Get DTK image from Quay.io (from JSON entry)
+        dtk_image=$(echo "$entry" | jq -r '.dtk')
+        
+        # Build kernel module for this version
+        if ! build_kernel_module_for_version "$version" "$dtk_image"; then
+            echo "Build failed for OCP version $version, continuing with next version..."
             continue
         fi
+        
+        echo "Build completed successfully for OCP version $version"
+        # TODO: Add GitHub Actions specific post-processing (tagging, storage, etc.)
+        
+    else
+        echo "Local/Dev: Processing OCP version $version"
         
         # Create base tag for this version
         BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
@@ -341,21 +328,19 @@ else
         podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
         # Then remove the image by ID to ensure complete removal
         podman rmi "${IMAGE_ID}" || true
-        
-        # Clean up the DTK image used for this build
-        echo "Cleaning up DTK image..."
-        # First remove the tag
-        podman rmi "${dtk_image}" || true
-        # Then remove by ID to ensure complete removal
-        if [ -n "${DTK_IMAGE_ID}" ]; then
-            podman rmi "${DTK_IMAGE_ID}" || true
-        fi
-        
-        # Clean the output directory for the next build
-        rm -f "${OUTPUT_DIR}/neuron.ko"
-        
-    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
-fi
+    fi
+    
+    # Common cleanup for both environments
+    echo "Cleaning up DTK image..."
+    podman rmi "${dtk_image}" || true
+    if [ -n "${DTK_IMAGE_ID}" ]; then
+        podman rmi "${DTK_IMAGE_ID}" || true
+    fi
+    
+    # Clean the output directory for the next build
+    rm -f "${OUTPUT_DIR}/neuron.ko"
+    
+done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 
 # Final cleanup
 echo "Cleaning up temporary directory..."
