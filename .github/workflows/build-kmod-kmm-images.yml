@@ -13,15 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y yq
-      
       - name: Load build matrix
         id: set-matrix
         run: |
-          matrix=$(yq eval '.matrix' build-matrix.yaml -o json)
+          matrix='{"include":'$(cat build-matrix.json)'}'
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
   build:
@@ -33,11 +28,6 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
       
       - name: Build images for driver ${{ matrix.driver }}
         run: |
