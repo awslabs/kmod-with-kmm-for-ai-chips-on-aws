@@ -35,11 +35,15 @@ check_command() {
 echo "Setting up error handling..."
 set -euo pipefail
 
-echo "Checking required commands..."
-# Check for required commands
-for cmd in aws jq podman; do
-    check_command "$cmd"
-done
+# Check for required commands (skip in GitHub Actions where tools are pre-installed)
+if ! is_github_actions; then
+    echo "Checking required commands..."
+    for cmd in aws jq podman; do
+        check_command "$cmd"
+    done
+else
+    echo "Running in GitHub Actions, skipping tool checks (tools pre-installed)"
+fi
 
 # Function to check if running in GitHub Actions
 is_github_actions() {
