@@ -1,17 +1,9 @@
-name: Build Container Images
+name: Build Kmod KMM images
 
 on:
-  push:
-    branches: [ main, feature/* ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force rebuild even if images exist'
-        required: false
-        default: 'false'
-        type: boolean
 
 jobs:
   setup-matrix:
