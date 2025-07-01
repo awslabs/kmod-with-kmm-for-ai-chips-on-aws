@@ -1,0 +1,44 @@
+name: Build Container Images
+
+on:
+  push:
+    branches: [ main, feature/* ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force rebuild even if images exist'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Load build matrix
+        id: set-matrix
+        run: |
+          matrix=$(yq eval '.matrix' build-matrix.yaml -o json)
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  build:
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+      fail-fast: false
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build images for driver ${{ matrix.driver }}
+        run: |
+          echo "Building for driver: ${{ matrix.driver }}"
+          echo "OCP versions: ${{ join(matrix.ocp_versions, ', ') }}"
+          # TODO: Add actual build steps here
