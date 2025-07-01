@@ -219,22 +219,30 @@ while IFS= read -r entry; do
         continue
     fi
     
-    # Get DTK image from ECR
-    dtk_ecr_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
+    # Get DTK image - from Quay.io in GitHub Actions, from ECR locally
+    if is_github_actions; then
+        dtk_image=$(jq -r ".[] | select(.version==\"$version\") | .dtk" "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+        if [ -z "$dtk_image" ] || [ "$dtk_image" = "null" ]; then
+            echo "Error: No DTK image found for OCP version $version in driver-toolkit.json"
+            continue
+        fi
+    else
+        dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
+    fi
     
     echo "Processing OCP version: ${version}"
     
     # Pull the DTK image
-    echo "Pulling DTK image: ${dtk_ecr_image}"
-    podman pull ${dtk_ecr_image} >/dev/null
+    echo "Pulling DTK image: ${dtk_image}"
+    podman pull ${dtk_image} >/dev/null
     
     # Get the image ID of the DTK image for later cleanup - using a more reliable method
-    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' ${dtk_ecr_image} 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_ecr_image}")
+    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' ${dtk_image} 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
     echo "DTK Image ID: ${DTK_IMAGE_ID}"
     
     # Extract kernel version from DTK container
     echo "Extracting kernel version from DTK image..."
-    KERNEL_VERSION=$(podman run --rm ${dtk_ecr_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
+    KERNEL_VERSION=$(podman run --rm ${dtk_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
     
     if [ -z "${KERNEL_VERSION}" ]; then
         echo "Error: Failed to extract kernel version from DTK image"
@@ -249,7 +257,7 @@ while IFS= read -r entry; do
         -v "${TEMP_DIR}/aws-neuron-driver/src:/aws-neuron-driver:Z" \
         -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
         -v "${OUTPUT_DIR}:/output:Z" \
-        ${dtk_ecr_image} \
+        ${dtk_image} \
         /build-module.sh "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}"
     
     # Check if build was successful
@@ -292,7 +300,7 @@ while IFS= read -r entry; do
     # Clean up the DTK image used for this build
     echo "Cleaning up DTK image..."
     # First remove the tag
-    podman rmi "${dtk_ecr_image}" || true
+    podman rmi "${dtk_image}" || true
     # Then remove by ID to ensure complete removal
     if [ -n "${DTK_IMAGE_ID}" ]; then
         podman rmi "${DTK_IMAGE_ID}" || true
