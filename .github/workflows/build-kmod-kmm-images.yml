@@ -34,20 +34,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman buildah
       
-      - name: Login to Quay.io
+      - name: Build images for driver ${{ matrix.driver }}
         env:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
-        run: |
-          if [ -n "$QUAY_USERNAME" ] && [ -n "$QUAY_PASSWORD" ]; then
-            set +x
-            echo "$QUAY_PASSWORD" | podman login quay.io -u "$QUAY_USERNAME" --password-stdin
-            set -x
-          else
-            echo "Quay.io credentials not available, skipping login"
-          fi
-      
-      - name: Build images for driver ${{ matrix.driver }}
         run: |
           echo "Building for driver: ${{ matrix.driver }}"
           echo "OCP versions: ${{ join(matrix.ocp_versions, ', ') }}"
