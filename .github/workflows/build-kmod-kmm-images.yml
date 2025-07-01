@@ -16,14 +16,14 @@ jobs:
       - name: Load build matrix
         id: set-matrix
         run: |
-          matrix='{"include":'$(cat build-matrix.json)'}'
-          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "matrix=$(cat build-matrix.json)" >> $GITHUB_OUTPUT
 
   build:
     needs: setup-matrix
     runs-on: ubuntu-latest
     strategy:
-      matrix: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
       fail-fast: false
     
     steps:
