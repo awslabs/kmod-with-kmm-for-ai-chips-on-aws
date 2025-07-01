@@ -29,6 +29,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Install container tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman buildah
+      
+      - name: Login to Quay.io
+        run: |
+          echo "${{ secrets.QUAY_PASSWORD }}" | podman login quay.io -u "${{ secrets.QUAY_USERNAME }}" --password-stdin
+      
       - name: Build images for driver ${{ matrix.driver }}
         run: |
           echo "Building for driver: ${{ matrix.driver }}"
