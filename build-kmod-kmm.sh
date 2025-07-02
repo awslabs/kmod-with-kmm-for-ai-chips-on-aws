@@ -414,11 +414,15 @@ while IFS= read -r entry; do
         dtk_image=$(echo "$entry" | jq -r '.dtk')
         
         # Build kernel module for this version
-        if ! build_kernel_module_for_version "$version" "$dtk_image"; then
-            if [ $? -eq 2 ]; then
-                echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
-                continue
-            fi
+        build_kernel_module_for_version "$version" "$dtk_image"
+        build_result=$?
+        
+        if [ $build_result -eq 2 ]; then
+            echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
+            continue
+        elif [ $build_result -ne 0 ]; then
+            echo "Build failed for OCP version $version, exiting..."
+            exit $build_result
         fi
         
         # Create GHCR tag with driver and kernel version
@@ -464,11 +468,15 @@ while IFS= read -r entry; do
         dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
         
         # Build kernel module for this version
-        if ! build_kernel_module_for_version "$version" "$dtk_image"; then
-            if [ $? -eq 2 ]; then
-                echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
-                continue
-            fi
+        build_kernel_module_for_version "$version" "$dtk_image"
+        build_result=$?
+        
+        if [ $build_result -eq 2 ]; then
+            echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
+            continue
+        elif [ $build_result -ne 0 ]; then
+            echo "Build failed for OCP version $version, exiting..."
+            exit $build_result
         fi
         
         # Create full tag with kernel version information
