@@ -87,30 +87,6 @@ version_matches() {
     fi
 }
 
-# Function to check if an image with a specific tag exists in ECR
-image_exists_in_ecr() {
-    local repository="$1"
-    local tag="$2"
-    
-    aws ecr describe-images \
-        --repository-name "${repository}" \
-        --image-ids imageTag="${tag}" \
-        --no-cli-pager >/dev/null 2>&1
-    return $?
-}
-
-# Function to check if an image with a specific tag exists in GHCR
-image_exists_in_ghcr() {
-    local image_name="$1"
-    local tag="$2"
-    
-    if podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/${image_name}:${tag}" >/dev/null 2>&1; then
-        return 0  # Image exists
-    else
-        return 1  # Image does not exist
-    fi
-}
-
 # Function to manage GitHub release for a Neuron driver version
 manage_github_release() {
     local driver_version="$1"
@@ -139,6 +115,11 @@ manage_github_release() {
     # Create release notes
     local release_notes
     release_notes="Container images for AWS Neuron driver version ${driver_version} compatible with various OpenShift releases and kernel versions.\n\n"
+
+    release_notes+="## Usage\n\n"
+    release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
+    release_notes+="Select the image that matches your AWS Inferentia / Trainium worker nodes kernel version.\n"
+
     release_notes+="## Available Images\n\n"
     
     while IFS= read -r tag; do
@@ -148,10 +129,6 @@ manage_github_release() {
             release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (Kernel: ${kernel_version})\n"
         fi
     done <<< "$image_list"
-    
-    release_notes+="\n## Usage\n\n"
-    release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
-    release_notes+="Select the image that matches your AWS Inferentia / Trainium worker nodes kernel version.\n"
     
     # Check if release needs updating
     if gh release view "$release_name" >/dev/null 2>&1; then
@@ -240,8 +217,11 @@ build_kernel_module_for_version() {
         if is_github_actions; then
             # Check GHCR with driver-kernel tag
             local ghcr_tag="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
-            if podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${ghcr_tag}" >/dev/null 2>&1; then
+            local ghcr_image="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${ghcr_tag}"
+            if podman pull "${ghcr_image}" >/dev/null 2>&1; then
                 echo "Final image already exists in GHCR for kernel ${KERNEL_VERSION}, skipping build..."
+                # Clean up the pulled image immediately
+                podman rmi "${ghcr_image}" >/dev/null 2>&1 || true
                 return 2  # Special return code for "skipped"
             fi
         else
