@@ -1,8 +1,11 @@
 name: Build Kmod KMM images
 
 on:
-  pull_request:
+  push:
     branches: [ main ]
+    paths:
+      - 'build-matrix.json'
+      - 'driver-toolkit/driver-toolkit.json'
   workflow_dispatch:
 
 jobs:
@@ -38,7 +41,16 @@ jobs:
         env:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Building for driver: ${{ matrix.driver }}"
           echo "OCP versions: ${{ join(matrix.ocp_versions, ', ') }}"
-          # TODO: Add actual build steps here
+          
+          # Make build script executable
+          chmod +x ./build-kmod-kmm.sh
+          
+          # Build images for each OCP version in the matrix
+          for ocp_version in ${{ join(matrix.ocp_versions, ' ') }}; do
+            echo "Building for OCP version: ${ocp_version}"
+            ./build-kmod-kmm.sh "${{ matrix.driver }}" "${ocp_version}"
+          done
