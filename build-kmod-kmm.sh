@@ -27,6 +27,18 @@ check_command() {
                 echo "  For Ubuntu/Debian: sudo apt-get install podman"
                 echo "  For macOS: brew install podman"
                 ;;
+            rpm2cpio)
+                echo "To install rpm2cpio:"
+                echo "  For RHEL/CentOS: sudo yum install rpm"
+                echo "  For Ubuntu/Debian: sudo apt-get install rpm2cpio"
+                echo "  For macOS: brew install rpm2cpio"
+                ;;
+            cpio)
+                echo "To install cpio:"
+                echo "  For RHEL/CentOS: sudo yum install cpio"
+                echo "  For Ubuntu/Debian: sudo apt-get install cpio"
+                echo "  For macOS: brew install cpio"
+                ;;
         esac
         exit 1
     fi
@@ -38,7 +50,7 @@ set -euo pipefail
 # Check for required commands (skip in GitHub Actions where tools are pre-installed)
 if ! is_github_actions; then
     echo "Checking required commands..."
-    for cmd in aws jq podman; do
+    for cmd in aws jq podman rpm2cpio cpio; do
         check_command "$cmd"
     done
 else
@@ -157,6 +169,41 @@ manage_github_release() {
     echo "GitHub release ${release_name} updated successfully"
 }
 
+# Function to download and extract Neuron driver source from RPM
+download_neuron_driver_source() {
+    local version="$1"
+    local temp_dir="$2"
+    
+    echo "Downloading Neuron driver source for version ${version}..."
+    
+    # Download RPM package
+    local rpm_url="https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${version}.noarch.rpm"
+    echo "Downloading from: ${rpm_url}"
+    
+    if ! wget -q "${rpm_url}" -O "${temp_dir}/aws-neuronx-dkms.rpm"; then
+        echo "Error: Failed to download Neuron driver RPM for version ${version}"
+        return 1
+    fi
+    
+    # Extract RPM contents
+    echo "Extracting RPM contents..."
+    cd "${temp_dir}"
+    
+    if ! rpm2cpio aws-neuronx-dkms.rpm | cpio -idmv >/dev/null 2>&1; then
+        echo "Error: Failed to extract RPM contents"
+        return 1
+    fi
+    
+    # Check if extraction was successful
+    if [ -d "usr/src/aws-neuronx-${version}" ]; then
+        echo "Successfully extracted Neuron driver source to usr/src/aws-neuronx-${version}"
+        return 0
+    else
+        echo "Error: Expected directory usr/src/aws-neuronx-${version} not found after extraction"
+        return 1
+    fi
+}
+
 # Function to build kernel module for a specific OCP version
 build_kernel_module_for_version() {
     local version="$1"
@@ -186,7 +233,7 @@ build_kernel_module_for_version() {
     # Build kernel module
     echo "Building kernel module for kernel ${KERNEL_VERSION}..."
     podman run --rm \
-        -v "${TEMP_DIR}/aws-neuron-driver/src:/aws-neuron-driver:Z" \
+        -v "${TEMP_DIR}/usr/src/aws-neuronx-${NEURON_DRIVER_VERSION}:/aws-neuron-driver:Z" \
         -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
         -v "${OUTPUT_DIR}:/output:Z" \
         ${dtk_image} \
@@ -328,15 +375,15 @@ fi
 # Store the original script directory before changing directories
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
-# Clone repo once outside the loop
-echo "Cloning AWS Neuron driver repository..."
+# Download and extract Neuron driver source from RPM
+echo "Downloading AWS Neuron driver source..."
 TEMP_DIR=$(mktemp -d)
-git clone https://github.com/wombelix/aws-neuron-driver.git "${TEMP_DIR}/aws-neuron-driver"
-cd "${TEMP_DIR}/aws-neuron-driver"
-# Suppress detached HEAD advice
-git config --global advice.detachedHead false
-git checkout --quiet ${NEURON_DRIVER_VERSION}
-cd ${SCRIPT_DIR}
+
+if ! download_neuron_driver_source "${NEURON_DRIVER_VERSION}" "${TEMP_DIR}"; then
+    echo "Failed to download Neuron driver source"
+    rm -rf "${TEMP_DIR}"
+    exit 1
+fi
 
 # Create output directory for all builds
 OUTPUT_DIR="${TEMP_DIR}/output"

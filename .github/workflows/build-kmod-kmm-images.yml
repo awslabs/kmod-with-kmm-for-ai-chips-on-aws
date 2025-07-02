@@ -32,10 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install container tools
+      - name: Install container tools and RPM utilities
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman
+          sudo apt-get install -y podman rpm2cpio cpio
       
       - name: Build images for driver ${{ matrix.driver }}
         env:
