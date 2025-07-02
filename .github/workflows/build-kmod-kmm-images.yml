@@ -1,0 +1,56 @@
+name: Build Kmod KMM images
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'build-matrix.json'
+      - 'driver-toolkit/driver-toolkit.json'
+  workflow_dispatch:
+
+jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Load build matrix
+        id: set-matrix
+        run: |
+          echo "matrix=$(cat build-matrix.json | tr -d '\n')" >> $GITHUB_OUTPUT
+
+  build:
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
+      fail-fast: false
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install container tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+      
+      - name: Build images for driver ${{ matrix.driver }}
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Building for driver: ${{ matrix.driver }}"
+          echo "OCP versions: ${{ join(matrix.ocp_versions, ', ') }}"
+          
+          # Make build script executable
+          chmod +x ./build-kmod-kmm.sh
+          
+          # Build images for each OCP version in the matrix
+          for ocp_version in ${{ join(matrix.ocp_versions, ' ') }}; do
+            echo "Building for OCP version: ${ocp_version}"
+            ./build-kmod-kmm.sh "${{ matrix.driver }}" "${ocp_version}"
+          done
