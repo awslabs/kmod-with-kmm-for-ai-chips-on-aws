@@ -108,6 +108,23 @@ image_exists_in_ghcr() {
     return $?
 }
 
+# Function to check if final image exists (environment-aware)
+final_image_exists() {
+    local driver_version="$1"
+    local kernel_version="$2"
+    local ocp_version="$3"
+    
+    if is_github_actions; then
+        # Check GHCR with driver-kernel tag
+        local ghcr_tag="${driver_version}-${kernel_version}"
+        image_exists_in_ghcr "neuron-driver" "${ghcr_tag}"
+    else
+        # Check ECR with base tag
+        local base_tag="neuron-driver${driver_version}-ocp${ocp_version}"
+        image_exists_in_ecr "${KMOD_ECR_REPOSITORY_NAME}" "${base_tag}"
+    fi
+}
+
 # Function to manage GitHub release for a Neuron driver version
 manage_github_release() {
     local driver_version="$1"
@@ -232,6 +249,12 @@ build_kernel_module_for_version() {
     fi
     
     echo "Detected kernel version: ${KERNEL_VERSION}"
+    
+    # Check if final image already exists (early optimization)
+    if [ "${FORCE_BUILD}" != "true" ] && final_image_exists "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}" "${version}"; then
+        echo "Final image already exists for kernel ${KERNEL_VERSION}, skipping build..."
+        return 2  # Special return code for "skipped"
+    fi
     
     # Build kernel module
     echo "Building kernel module for kernel ${KERNEL_VERSION}..."
@@ -414,19 +437,15 @@ while IFS= read -r entry; do
         
         # Build kernel module for this version
         if ! build_kernel_module_for_version "$version" "$dtk_image"; then
-            echo "Build failed for OCP version $version, continuing with next version..."
-            continue
+            if [ $? -eq 2 ]; then
+                echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
+                continue
+            fi
         fi
         
         # Create GHCR tag with driver and kernel version
         GHCR_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
         GHCR_IMAGE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${GHCR_TAG}"
-        
-        # Check if image already exists in GHCR
-        if [ "${FORCE_BUILD}" != "true" ] && image_exists_in_ghcr "neuron-driver" "${GHCR_TAG}"; then
-            echo "Image with tag ${GHCR_TAG} already exists in GHCR, skipping build..."
-            continue
-        fi
         
         # Build final image with GHCR tag and labels
         echo "Building final image with tag: ${GHCR_TAG}"
@@ -463,19 +482,15 @@ while IFS= read -r entry; do
         # Create base tag for this version
         BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
         
-        # Check if image with this tag already exists in ECR
-        if [ "${FORCE_BUILD}" != "true" ] && image_exists_in_ecr "${KMOD_ECR_REPOSITORY_NAME}" "${BASE_TAG}"; then
-            echo "Image with tag ${BASE_TAG} already exists in ECR, skipping build..."
-            continue
-        fi
-        
         # Get DTK image from ECR
         dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
         
         # Build kernel module for this version
         if ! build_kernel_module_for_version "$version" "$dtk_image"; then
-            echo "Build failed for OCP version $version, continuing with next version..."
-            continue
+            if [ $? -eq 2 ]; then
+                echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
+                continue
+            fi
         fi
         
         # Create full tag with kernel version information
