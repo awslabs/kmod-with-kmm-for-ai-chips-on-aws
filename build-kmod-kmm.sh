@@ -229,6 +229,18 @@ if ! is_github_actions; then
     fi
 else
     echo "Running in GitHub Actions, skipping AWS/ECR setup"
+    
+    # Authenticate with Quay.io for DTK images (required in GitHub Actions)
+    if [ -n "${QUAY_USERNAME:-}" ] && [ -n "${QUAY_PASSWORD:-}" ]; then
+        echo "Logging into Quay.io..."
+        set +x
+        echo "${QUAY_PASSWORD}" | podman login quay.io -u "${QUAY_USERNAME}" --password-stdin
+        set -x
+    else
+        echo "Error: QUAY_USERNAME and QUAY_PASSWORD environment variables are required in GitHub Actions"
+        echo "These credentials are needed to pull DTK images from quay.io"
+        exit 1
+    fi
 fi
 
 # Store the original script directory before changing directories
