@@ -104,24 +104,10 @@ image_exists_in_ghcr() {
     local image_name="$1"
     local tag="$2"
     
-    podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/${image_name}:${tag}" >/dev/null 2>&1
-    return $?
-}
-
-# Function to check if final image exists (environment-aware)
-final_image_exists() {
-    local driver_version="$1"
-    local kernel_version="$2"
-    local ocp_version="$3"
-    
-    if is_github_actions; then
-        # Check GHCR with driver-kernel tag
-        local ghcr_tag="${driver_version}-${kernel_version}"
-        image_exists_in_ghcr "neuron-driver" "${ghcr_tag}"
+    if podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/${image_name}:${tag}" >/dev/null 2>&1; then
+        return 0  # Image exists
     else
-        # Check ECR with base tag
-        local base_tag="neuron-driver${driver_version}-ocp${ocp_version}"
-        image_exists_in_ecr "${KMOD_ECR_REPOSITORY_NAME}" "${base_tag}"
+        return 1  # Image does not exist
     fi
 }
 
@@ -251,9 +237,22 @@ build_kernel_module_for_version() {
     echo "Detected kernel version: ${KERNEL_VERSION}"
     
     # Check if final image already exists (early optimization)
-    if [ "${FORCE_BUILD}" != "true" ] && final_image_exists "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}" "${version}"; then
-        echo "Final image already exists for kernel ${KERNEL_VERSION}, skipping build..."
-        return 2  # Special return code for "skipped"
+    if [ "${FORCE_BUILD}" != "true" ]; then
+        if is_github_actions; then
+            # Check GHCR with driver-kernel tag
+            local ghcr_tag="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
+            if podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${ghcr_tag}" >/dev/null 2>&1; then
+                echo "Final image already exists in GHCR for kernel ${KERNEL_VERSION}, skipping build..."
+                return 2  # Special return code for "skipped"
+            fi
+        else
+            # Check ECR with base tag
+            local base_tag="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
+            if aws ecr describe-images --repository-name "${KMOD_ECR_REPOSITORY_NAME}" --image-ids imageTag="${base_tag}" --no-cli-pager >/dev/null 2>&1; then
+                echo "Final image already exists in ECR for kernel ${KERNEL_VERSION}, skipping build..."
+                return 2  # Special return code for "skipped"
+            fi
+        fi
     fi
     
     # Build kernel module
