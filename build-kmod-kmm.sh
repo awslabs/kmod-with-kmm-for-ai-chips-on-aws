@@ -96,6 +96,67 @@ image_exists_in_ghcr() {
     return $?
 }
 
+# Function to manage GitHub release for a Neuron driver version
+manage_github_release() {
+    local driver_version="$1"
+    local release_name="neuron-driver-${driver_version}"
+    
+    echo "Managing GitHub release: ${release_name}"
+    
+    # Query GHCR for all images matching this driver version
+    echo "Querying GHCR for images matching neuron-driver:${driver_version}-*"
+    
+    # Get all tags for the neuron-driver repository that match our driver version
+    local image_list
+    image_list=$(gh api \
+        "/orgs/awslabs/packages/container/kmod-with-kmm-for-ai-chips-on-aws%2Fneuron-driver/versions" \
+        --jq ".[] | select(.metadata.container.tags[]? | startswith(\"${driver_version}-\")) | .metadata.container.tags[]" \
+        2>/dev/null | sort || echo "")
+    
+    if [ -z "$image_list" ]; then
+        echo "No images found for driver version ${driver_version}"
+        return 0
+    fi
+    
+    # Create release notes
+    local release_notes
+    release_notes="# Neuron Driver ${driver_version} - Kernel Module Images\n\n"
+    release_notes+="Container images for AWS Neuron driver version ${driver_version} compatible with various OpenShift kernel versions.\n\n"
+    release_notes+="## Available Images\n\n"
+    
+    while IFS= read -r tag; do
+        if [ -n "$tag" ]; then
+            # Extract kernel version from tag (format: driver-version-kernel-version)
+            kernel_version="${tag#${driver_version}-}"
+            release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (Kernel: ${kernel_version})\n"
+        fi
+    done <<< "$image_list"
+    
+    release_notes+="\n## Usage\n\n"
+    release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
+    release_notes+="Select the image that matches your cluster's kernel version.\n"
+    
+    # Check if release needs updating
+    if gh release view "$release_name" >/dev/null 2>&1; then
+        # Get current release notes
+        current_notes=$(gh release view "$release_name" --json body --jq .body 2>/dev/null || echo "")
+        
+        # Compare with new notes (normalize line endings)
+        if [ "$(echo -e "$release_notes" | tr -d '\r')" = "$(echo "$current_notes" | tr -d '\r')" ]; then
+            echo "Release ${release_name} is already up-to-date, skipping update"
+            return 0
+        fi
+        
+        echo "Updating existing release: ${release_name}"
+        echo -e "$release_notes" | gh release edit "$release_name" --notes-file -
+    else
+        echo "Creating new release: ${release_name}"
+        echo -e "$release_notes" | gh release create "$release_name" --title "Neuron Driver ${driver_version}" --notes-file -
+    fi
+    
+    echo "GitHub release ${release_name} updated successfully"
+}
+
 # Function to build kernel module for a specific OCP version
 build_kernel_module_for_version() {
     local version="$1"
@@ -410,6 +471,12 @@ while IFS= read -r entry; do
     rm -f "${OUTPUT_DIR}/neuron.ko"
     
 done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+
+# Update GitHub release after all builds complete (GitHub Actions only)
+if is_github_actions; then
+    echo "Updating GitHub release for Neuron driver version ${NEURON_DRIVER_VERSION}..."
+    manage_github_release "${NEURON_DRIVER_VERSION}"
+fi
 
 # Final cleanup
 echo "Cleaning up temporary directory..."
