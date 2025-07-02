@@ -240,8 +240,11 @@ build_kernel_module_for_version() {
         if is_github_actions; then
             # Check GHCR with driver-kernel tag
             local ghcr_tag="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
-            if podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${ghcr_tag}" >/dev/null 2>&1; then
+            local ghcr_image="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${ghcr_tag}"
+            if podman pull "${ghcr_image}" >/dev/null 2>&1; then
                 echo "Final image already exists in GHCR for kernel ${KERNEL_VERSION}, skipping build..."
+                # Clean up the pulled image immediately
+                podman rmi "${ghcr_image}" >/dev/null 2>&1 || true
                 return 2  # Special return code for "skipped"
             fi
         else
