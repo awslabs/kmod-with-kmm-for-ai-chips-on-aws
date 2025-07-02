@@ -139,6 +139,11 @@ manage_github_release() {
     # Create release notes
     local release_notes
     release_notes="Container images for AWS Neuron driver version ${driver_version} compatible with various OpenShift releases and kernel versions.\n\n"
+
+    release_notes+="## Usage\n\n"
+    release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
+    release_notes+="Select the image that matches your AWS Inferentia / Trainium worker nodes kernel version.\n"
+
     release_notes+="## Available Images\n\n"
     
     while IFS= read -r tag; do
@@ -148,10 +153,6 @@ manage_github_release() {
             release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (Kernel: ${kernel_version})\n"
         fi
     done <<< "$image_list"
-    
-    release_notes+="\n## Usage\n\n"
-    release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
-    release_notes+="Select the image that matches your AWS Inferentia / Trainium worker nodes kernel version.\n"
     
     # Check if release needs updating
     if gh release view "$release_name" >/dev/null 2>&1; then
