@@ -87,30 +87,6 @@ version_matches() {
     fi
 }
 
-# Function to check if an image with a specific tag exists in ECR
-image_exists_in_ecr() {
-    local repository="$1"
-    local tag="$2"
-    
-    aws ecr describe-images \
-        --repository-name "${repository}" \
-        --image-ids imageTag="${tag}" \
-        --no-cli-pager >/dev/null 2>&1
-    return $?
-}
-
-# Function to check if an image with a specific tag exists in GHCR
-image_exists_in_ghcr() {
-    local image_name="$1"
-    local tag="$2"
-    
-    if podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/${image_name}:${tag}" >/dev/null 2>&1; then
-        return 0  # Image exists
-    else
-        return 1  # Image does not exist
-    fi
-}
-
 # Function to manage GitHub release for a Neuron driver version
 manage_github_release() {
     local driver_version="$1"
