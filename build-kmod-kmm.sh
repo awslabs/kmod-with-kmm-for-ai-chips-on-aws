@@ -47,6 +47,11 @@ check_command() {
 echo "Setting up error handling..."
 set -euo pipefail
 
+# Function to check if running in GitHub Actions
+is_github_actions() {
+    [ -n "${GITHUB_ACTIONS:-}" ]
+}
+
 # Check for required commands (skip in GitHub Actions where tools are pre-installed)
 if ! is_github_actions; then
     echo "Checking required commands..."
@@ -56,11 +61,6 @@ if ! is_github_actions; then
 else
     echo "Running in GitHub Actions, skipping tool checks (tools pre-installed)"
 fi
-
-# Function to check if running in GitHub Actions
-is_github_actions() {
-    [ -n "${GITHUB_ACTIONS:-}" ]
-}
 
 # Function to validate AWS credentials are available
 validate_aws_credentials() {
@@ -114,6 +114,9 @@ manage_github_release() {
     local release_name="neuron-driver-${driver_version}"
     
     echo "Managing GitHub release: ${release_name}"
+    
+    # Change to repository root for GitHub CLI operations
+    cd "${GITHUB_WORKSPACE}"
     
     # Query GHCR for all images matching this driver version
     echo "Querying GHCR for images matching neuron-driver:${driver_version}-*"
