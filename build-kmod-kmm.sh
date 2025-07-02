@@ -413,9 +413,11 @@ while IFS= read -r entry; do
         # Get DTK image from Quay.io (from JSON entry)
         dtk_image=$(echo "$entry" | jq -r '.dtk')
         
-        # Build kernel module for this version
+        # Build kernel module for this version (disable exit-on-error to capture return code)
+        set +e
         build_kernel_module_for_version "$version" "$dtk_image"
         build_result=$?
+        set -e
         
         if [ $build_result -eq 2 ]; then
             echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
@@ -467,9 +469,11 @@ while IFS= read -r entry; do
         # Get DTK image from ECR
         dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
         
-        # Build kernel module for this version
+        # Build kernel module for this version (disable exit-on-error to capture return code)
+        set +e
         build_kernel_module_for_version "$version" "$dtk_image"
         build_result=$?
+        set -e
         
         if [ $build_result -eq 2 ]; then
             echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
