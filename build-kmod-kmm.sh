@@ -87,6 +87,15 @@ image_exists_in_ecr() {
     return $?
 }
 
+# Function to check if an image with a specific tag exists in GHCR
+image_exists_in_ghcr() {
+    local image_name="$1"
+    local tag="$2"
+    
+    podman manifest inspect "ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/${image_name}:${tag}" >/dev/null 2>&1
+    return $?
+}
+
 # Function to build kernel module for a specific OCP version
 build_kernel_module_for_version() {
     local version="$1"
@@ -241,6 +250,18 @@ else
         echo "These credentials are needed to pull DTK images from quay.io"
         exit 1
     fi
+    
+    # Authenticate with GHCR for pushing images (required in GitHub Actions)
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        echo "Logging into GHCR..."
+        set +x
+        echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+        set -x
+    else
+        echo "Error: GITHUB_TOKEN environment variable is required in GitHub Actions"
+        echo "This token is needed to push images to ghcr.io"
+        exit 1
+    fi
 fi
 
 # Store the original script directory before changing directories
@@ -286,8 +307,44 @@ while IFS= read -r entry; do
             continue
         fi
         
+        # Create GHCR tag with driver and kernel version
+        GHCR_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
+        GHCR_IMAGE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${GHCR_TAG}"
+        
+        # Check if image already exists in GHCR
+        if [ "${FORCE_BUILD}" != "true" ] && image_exists_in_ghcr "neuron-driver" "${GHCR_TAG}"; then
+            echo "Image with tag ${GHCR_TAG} already exists in GHCR, skipping build..."
+            continue
+        fi
+        
+        # Build final image with GHCR tag and labels
+        echo "Building final image with tag: ${GHCR_TAG}"
+        podman build \
+            --platform=linux/amd64 \
+            --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
+            --build-arg OCP_VERSION="${version}" \
+            --label "org.opencontainers.image.version=${NEURON_DRIVER_VERSION}" \
+            --label "org.opencontainers.image.source=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "neuron-driver-version=${NEURON_DRIVER_VERSION}" \
+            --label "kernel-version=${KERNEL_VERSION}" \
+            --label "openshift-version=${version}" \
+            -f "${SCRIPT_DIR}/container/Containerfile" \
+            -t "${GHCR_IMAGE}" \
+            --iidfile "${TEMP_DIR}/image.id" \
+            "${OUTPUT_DIR}"
+        
+        # Push image to GHCR
+        echo "Pushing image to GHCR..."
+        podman push "${GHCR_IMAGE}"
+        
+        # Clean up the built image
+        echo "Cleaning up built image..."
+        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
+        podman rmi "${GHCR_IMAGE}" || true
+        podman rmi "${IMAGE_ID}" || true
+        
         echo "Build completed successfully for OCP version $version"
-        # TODO: Add GitHub Actions specific post-processing (tagging, storage, etc.)
         
     else
         echo "Local/Dev: Processing OCP version $version"
