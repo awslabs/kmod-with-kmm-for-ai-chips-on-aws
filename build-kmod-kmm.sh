@@ -101,14 +101,53 @@ manage_github_release() {
     echo "Querying GHCR for images matching neuron-driver:${driver_version}-*"
     
     # Get all tags for the neuron-driver repository that match our driver version
-    local image_list
-    image_list=$(gh api \
+    local all_tags
+    all_tags=$(gh api \
         "/orgs/awslabs/packages/container/kmod-with-kmm-for-ai-chips-on-aws%2Fneuron-driver/versions" \
         --jq ".[] | select(.metadata.container.tags[]? | startswith(\"${driver_version}-\")) | .metadata.container.tags[]" \
-        2>/dev/null | sort || echo "")
+        2>/dev/null | sort -u || echo "")
     
-    if [ -z "$image_list" ]; then
+    if [ -z "$all_tags" ]; then
         echo "No images found for driver version ${driver_version}"
+        return 0
+    fi
+    
+    # Separate kernel tags and OCP tags, create mapping
+    local kernel_tags=""
+    declare -A ocp_to_kernel
+    
+    while IFS= read -r tag; do
+        if [ -n "$tag" ]; then
+            if [[ "$tag" =~ -ocp([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+                # This is an OCP tag, find corresponding kernel tag
+                local ocp_version="${BASH_REMATCH[1]}"
+                # We need to find the kernel version for this OCP version by checking driver-toolkit.json
+                local kernel_version=$(jq -r ".[] | select(.version == \"${ocp_version}\") | .dtk" "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json" 2>/dev/null | head -1)
+                if [ -n "$kernel_version" ] && [ "$kernel_version" != "null" ]; then
+                    # Extract kernel version from DTK image (this is a simplified approach)
+                    # In practice, we'd need the actual kernel version, but for now we'll map OCP to kernel tag
+                    local kernel_tag_pattern="${driver_version}-"
+                    local matching_kernel_tag=$(echo "$all_tags" | grep "^${kernel_tag_pattern}" | grep -v "ocp" | head -1)
+                    if [ -n "$matching_kernel_tag" ]; then
+                        if [ -z "${ocp_to_kernel[$matching_kernel_tag]:-}" ]; then
+                            ocp_to_kernel[$matching_kernel_tag]="$ocp_version"
+                        else
+                            ocp_to_kernel[$matching_kernel_tag]="${ocp_to_kernel[$matching_kernel_tag]}, $ocp_version"
+                        fi
+                    fi
+                fi
+            else
+                # This is a kernel tag
+                kernel_tags+="$tag"$'\n'
+            fi
+        fi
+    done <<< "$all_tags"
+    
+    # Remove empty lines
+    kernel_tags=$(echo "$kernel_tags" | grep -v '^$' | sort -u)
+    
+    if [ -z "$kernel_tags" ]; then
+        echo "No kernel-based images found for driver version ${driver_version}"
         return 0
     fi
     
@@ -124,11 +163,16 @@ manage_github_release() {
     
     while IFS= read -r tag; do
         if [ -n "$tag" ]; then
-            # Extract kernel version from tag (format: driver-version-kernel-version)
-            kernel_version="${tag#${driver_version}-}"
-            release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (Kernel: ${kernel_version})\n"
+            local ocp_versions="${ocp_to_kernel[$tag]:-}"
+            if [ -n "$ocp_versions" ]; then
+                release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (OCP: ${ocp_versions})\n"
+            else
+                # Fallback to showing kernel version if no OCP mapping found
+                local kernel_version="${tag#${driver_version}-}"
+                release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (Kernel: ${kernel_version})\n"
+            fi
         fi
-    done <<< "$image_list"
+    done <<< "$kernel_tags"
     
     # Check if release needs updating
     if gh release view "$release_name" >/dev/null 2>&1; then
@@ -211,28 +255,6 @@ build_kernel_module_for_version() {
     fi
     
     echo "Detected kernel version: ${KERNEL_VERSION}"
-    
-    # Check if final image already exists (early optimization)
-    if [ "${FORCE_BUILD}" != "true" ]; then
-        if is_github_actions; then
-            # Check GHCR with driver-kernel tag
-            local ghcr_tag="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
-            local ghcr_image="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${ghcr_tag}"
-            if podman pull "${ghcr_image}" >/dev/null 2>&1; then
-                echo "Final image already exists in GHCR for kernel ${KERNEL_VERSION}, skipping build..."
-                # Clean up the pulled image immediately
-                podman rmi "${ghcr_image}" >/dev/null 2>&1 || true
-                return 2  # Special return code for "skipped"
-            fi
-        else
-            # Check ECR with base tag
-            local base_tag="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
-            if aws ecr describe-images --repository-name "${KMOD_ECR_REPOSITORY_NAME}" --image-ids imageTag="${base_tag}" --no-cli-pager >/dev/null 2>&1; then
-                echo "Final image already exists in ECR for kernel ${KERNEL_VERSION}, skipping build..."
-                return 2  # Special return code for "skipped"
-            fi
-        fi
-    fi
     
     # Build kernel module
     echo "Building kernel module for kernel ${KERNEL_VERSION}..."
@@ -429,10 +451,7 @@ while IFS= read -r entry; do
         build_result=$?
         set -e
         
-        if [ $build_result -eq 2 ]; then
-            echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
-            continue
-        elif [ $build_result -ne 0 ]; then
+        if [ $build_result -ne 0 ]; then
             echo "Build failed for OCP version $version, exiting..."
             exit $build_result
         fi
@@ -491,10 +510,7 @@ while IFS= read -r entry; do
         build_result=$?
         set -e
         
-        if [ $build_result -eq 2 ]; then
-            echo "Build skipped for OCP version $version (image already exists), continuing with next version..."
-            continue
-        elif [ $build_result -ne 0 ]; then
+        if [ $build_result -ne 0 ]; then
             echo "Build failed for OCP version $version, exiting..."
             exit $build_result
         fi
