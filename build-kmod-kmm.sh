@@ -118,7 +118,9 @@ manage_github_release() {
 
     release_notes+="## Usage\n\n"
     release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
-    release_notes+="Select the image that matches your AWS Inferentia / Trainium worker nodes kernel version.\n"
+    release_notes+="Select the image that matches your worker nodes kernel version or your OpenShift version:\n"
+    release_notes+="- Use kernel-based tags (e.g., \`${driver_version}-5.14.0-...\`) to match specific kernel versions\n"
+    release_notes+="- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18.0\`) to match your OpenShift version\n"
 
     release_notes+="## Available Images\n\n"
     
