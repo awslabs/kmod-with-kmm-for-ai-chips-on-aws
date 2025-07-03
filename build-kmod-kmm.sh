@@ -410,6 +410,16 @@ while IFS= read -r entry; do
     if is_github_actions; then
         echo "GitHub Actions: Processing OCP version $version"
         
+        # Early check using OCP version tag before DTK download
+        OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
+        OCP_IMAGE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${OCP_TAG}"
+        
+        if [ "${FORCE_BUILD}" != "true" ] && podman pull "${OCP_IMAGE}" >/dev/null 2>&1; then
+            echo "Image already exists for OCP ${version}, skipping build..."
+            podman rmi "${OCP_IMAGE}" >/dev/null 2>&1 || true
+            continue
+        fi
+        
         # Get DTK image from Quay.io (from JSON entry)
         dtk_image=$(echo "$entry" | jq -r '.dtk')
         
@@ -427,12 +437,13 @@ while IFS= read -r entry; do
             exit $build_result
         fi
         
-        # Create GHCR tag with driver and kernel version
-        GHCR_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
-        GHCR_IMAGE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${GHCR_TAG}"
+        # Create GHCR tags - primary (kernel-based) and secondary (OCP-based)
+        KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
+        OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
+        GHCR_IMAGE_BASE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver"
         
-        # Build final image with GHCR tag and labels
-        echo "Building final image with tag: ${GHCR_TAG}"
+        # Build final image with primary tag
+        echo "Building final image with tags: ${KERNEL_TAG}, ${OCP_TAG}"
         podman build \
             --platform=linux/amd64 \
             --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
@@ -444,18 +455,23 @@ while IFS= read -r entry; do
             --label "kernel-version=${KERNEL_VERSION}" \
             --label "openshift-version=${version}" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
-            -t "${GHCR_IMAGE}" \
+            -t "${GHCR_IMAGE_BASE}:${KERNEL_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
             "${OUTPUT_DIR}"
         
-        # Push image to GHCR
-        echo "Pushing image to GHCR..."
-        podman push "${GHCR_IMAGE}"
+        # Add secondary OCP-based tag to same image
+        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
+        podman tag "${IMAGE_ID}" "${GHCR_IMAGE_BASE}:${OCP_TAG}"
+        
+        # Push both tags to GHCR
+        echo "Pushing images to GHCR..."
+        podman push "${GHCR_IMAGE_BASE}:${KERNEL_TAG}"
+        podman push "${GHCR_IMAGE_BASE}:${OCP_TAG}"
         
         # Clean up the built image
         echo "Cleaning up built image..."
-        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman rmi "${GHCR_IMAGE}" || true
+        podman rmi "${GHCR_IMAGE_BASE}:${KERNEL_TAG}" || true
+        podman rmi "${GHCR_IMAGE_BASE}:${OCP_TAG}" || true
         podman rmi "${IMAGE_ID}" || true
         
         echo "Build completed successfully for OCP version $version"
