@@ -100,7 +100,7 @@ manage_github_release() {
     # Query GHCR for all images matching this driver version
     echo "Querying GHCR for images matching neuron-driver:${driver_version}-*"
     
-    # Get all tags for the neuron-driver repository that match our driver version
+    # Get all unique tags and sort them
     local all_tags
     all_tags=$(gh api \
         "/orgs/awslabs/packages/container/kmod-with-kmm-for-ai-chips-on-aws%2Fneuron-driver/versions" \
@@ -109,45 +109,6 @@ manage_github_release() {
     
     if [ -z "$all_tags" ]; then
         echo "No images found for driver version ${driver_version}"
-        return 0
-    fi
-    
-    # Separate kernel tags and OCP tags, create mapping
-    local kernel_tags=""
-    declare -A ocp_to_kernel
-    
-    while IFS= read -r tag; do
-        if [ -n "$tag" ]; then
-            if [[ "$tag" =~ -ocp([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-                # This is an OCP tag, find corresponding kernel tag
-                local ocp_version="${BASH_REMATCH[1]}"
-                # We need to find the kernel version for this OCP version by checking driver-toolkit.json
-                local kernel_version=$(jq -r ".[] | select(.version == \"${ocp_version}\") | .dtk" "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json" 2>/dev/null | head -1)
-                if [ -n "$kernel_version" ] && [ "$kernel_version" != "null" ]; then
-                    # Extract kernel version from DTK image (this is a simplified approach)
-                    # In practice, we'd need the actual kernel version, but for now we'll map OCP to kernel tag
-                    local kernel_tag_pattern="${driver_version}-"
-                    local matching_kernel_tag=$(echo "$all_tags" | grep "^${kernel_tag_pattern}" | grep -v "ocp" | head -1)
-                    if [ -n "$matching_kernel_tag" ]; then
-                        if [ -z "${ocp_to_kernel[$matching_kernel_tag]:-}" ]; then
-                            ocp_to_kernel[$matching_kernel_tag]="$ocp_version"
-                        else
-                            ocp_to_kernel[$matching_kernel_tag]="${ocp_to_kernel[$matching_kernel_tag]}, $ocp_version"
-                        fi
-                    fi
-                fi
-            else
-                # This is a kernel tag
-                kernel_tags+="$tag"$'\n'
-            fi
-        fi
-    done <<< "$all_tags"
-    
-    # Remove empty lines
-    kernel_tags=$(echo "$kernel_tags" | grep -v '^$' | sort -u)
-    
-    if [ -z "$kernel_tags" ]; then
-        echo "No kernel-based images found for driver version ${driver_version}"
         return 0
     fi
     
@@ -163,16 +124,9 @@ manage_github_release() {
     
     while IFS= read -r tag; do
         if [ -n "$tag" ]; then
-            local ocp_versions="${ocp_to_kernel[$tag]:-}"
-            if [ -n "$ocp_versions" ]; then
-                release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (OCP: ${ocp_versions})\n"
-            else
-                # Fallback to showing kernel version if no OCP mapping found
-                local kernel_version="${tag#${driver_version}-}"
-                release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\` (Kernel: ${kernel_version})\n"
-            fi
+            release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\`\n"
         fi
-    done <<< "$kernel_tags"
+    done <<< "$all_tags"
     
     # Check if release needs updating
     if gh release view "$release_name" >/dev/null 2>&1; then
