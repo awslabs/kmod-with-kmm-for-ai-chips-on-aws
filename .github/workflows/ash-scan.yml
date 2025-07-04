@@ -1,0 +1,35 @@
+name: ASH SAST Scan
+
+on:
+  pull_request:
+    branches: [ main ]
+
+env:
+  ASH_OUTPUT_PATH: ash_output
+
+jobs:
+  ash-scan:
+    name: Run ASH Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ASH
+        uses: actions/checkout@v4
+        with:
+          path: ./automated-security-helper
+          repository: awslabs/automated-security-helper
+          ref: v2.0.1
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          path: ./repo
+      - name: Run ASH scan
+        run: |
+          export PATH="$(pwd)/automated-security-helper:$PATH"
+          ash --source-dir "$(pwd)/repo" --output-dir "${{ env.ASH_OUTPUT_PATH }}"
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ env.ASH_OUTPUT_PATH }}
+          path: ${{ env.ASH_OUTPUT_PATH }}
+          include-hidden-files: true
