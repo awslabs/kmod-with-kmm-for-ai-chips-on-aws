@@ -70,6 +70,36 @@ For more information about the Driver Toolkit utilities, see [driver-toolkit/REA
 - **Public Access**: No authentication required for pulling images
 - **Automated Releases**: Each driver version gets a GitHub release with usage documentation
 
+## Prerequisites
+
+### For GitHub Actions (Automated)
+- Repository secrets configured:
+  - `QUAY_USERNAME`: Red Hat registry username
+  - `QUAY_PASSWORD`: Red Hat registry password
+- Valid `build-matrix.json` configuration
+
+### For Local Development
+- AWS CLI with ECR permissions
+- Podman installed
+- Red Hat OpenShift pull secret (for DTK access)
+- jq and standard build tools
+
+## Configuration
+
+### build-matrix.json
+Defines which driver versions and OCP versions to build:
+```json
+[
+  {
+    "driver": "2.22.2.0",
+    "ocp_versions": ["4.16", "4.17", "4.18", "4.19"]
+  }
+]
+```
+
+### driver-toolkit/driver-toolkit.json
+Auto-generated mapping of OCP versions to DTK images. Updated nightly via GitHub Actions.
+
 ## Manual Usage (Development/Local Environments)
 
 The project maintains full backward compatibility for local development and custom ECR deployments.
@@ -145,6 +175,24 @@ FORCE_BUILD=true ./build-kmod-kmm.sh 2.16.7.0
 **GitHub Actions/GHCR Mode:**
 - Kernel-specific: `${DRIVER_VERSION}-${KERNEL_VERSION}`
 - OCP-specific: `${DRIVER_VERSION}-ocp${OCP_VERSION}`
+
+## Troubleshooting
+
+### Common Issues
+
+**GitHub Actions Build Failures:**
+- Verify `QUAY_USERNAME` and `QUAY_PASSWORD` secrets are configured
+- Check that `build-matrix.json` contains valid driver versions
+- Ensure DTK images are available for specified OCP versions
+
+**Local Build Issues:**
+- Confirm AWS credentials and ECR repository access
+- Verify Quay.io authentication for DTK image access
+- Check that specified driver version exists in Neuron repositories
+
+**Image Compatibility:**
+- Use kernel-specific tags for exact kernel matches
+- Use OCP-specific tags for broader compatibility within OCP versions
 
 ## Security
 
