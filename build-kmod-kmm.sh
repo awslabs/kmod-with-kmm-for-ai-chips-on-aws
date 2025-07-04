@@ -100,9 +100,9 @@ manage_github_release() {
     # Query GHCR for all images matching this driver version
     echo "Querying GHCR for images matching neuron-driver:${driver_version}-*"
     
-    # Get all unique tags and sort them
+    # Get all unique tags with pagination and sort them
     local all_tags
-    all_tags=$(gh api \
+    all_tags=$(gh api --paginate \
         "/orgs/awslabs/packages/container/kmod-with-kmm-for-ai-chips-on-aws%2Fneuron-driver/versions" \
         --jq ".[] | select(.metadata.container.tags[]? | startswith(\"${driver_version}-\")) | .metadata.container.tags[]" \
         2>/dev/null | sort -u || echo "")
