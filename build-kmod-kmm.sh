@@ -195,15 +195,15 @@ build_kernel_module_for_version() {
     
     # Pull the DTK image
     echo "Pulling DTK image: ${dtk_image}"
-    podman pull ${dtk_image} >/dev/null
+    podman pull "${dtk_image}" >/dev/null
     
     # Get the image ID of the DTK image for later cleanup - using a more reliable method
-    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' ${dtk_image} 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
+    DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' "${dtk_image}" 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
     echo "DTK Image ID: ${DTK_IMAGE_ID}"
     
     # Extract kernel version from DTK container
     echo "Extracting kernel version from DTK image..."
-    KERNEL_VERSION=$(podman run --rm ${dtk_image} bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
+    KERNEL_VERSION=$(podman run --rm "${dtk_image}" bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
     
     if [ -z "${KERNEL_VERSION}" ]; then
         echo "Error: Failed to extract kernel version from DTK image"
@@ -218,7 +218,7 @@ build_kernel_module_for_version() {
         -v "${TEMP_DIR}/usr/src/aws-neuronx-${NEURON_DRIVER_VERSION}:/aws-neuron-driver:Z" \
         -v "${TEMP_DIR}/build-module.sh:/build-module.sh:Z" \
         -v "${OUTPUT_DIR}:/output:Z" \
-        ${dtk_image} \
+        "${dtk_image}" \
         /build-module.sh "${NEURON_DRIVER_VERSION}" "${KERNEL_VERSION}"
     
     # Check if build was successful
@@ -529,7 +529,7 @@ rm -rf "${TEMP_DIR}"
 echo "Cleaning up dangling images..."
 DANGLING_IMAGES=$(podman images -f "dangling=true" -q)
 if [ -n "${DANGLING_IMAGES}" ]; then
-    podman rmi ${DANGLING_IMAGES} || true
+    podman rmi "${DANGLING_IMAGES}" || true
 else
     echo "No dangling images found"
 fi

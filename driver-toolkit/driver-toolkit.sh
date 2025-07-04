@@ -37,7 +37,7 @@ temp_json=$(mktemp)
 echo "[" > "$temp_json"
 
 first_entry=true
-for major in 4; do
+for major in {4..4}; do
     for minor in {16..19}; do
         page=1
         while true; do

@@ -36,7 +36,7 @@ fi
 
 # Build the module
 echo "Building kernel module..."
-make -C /lib/modules/${KERNEL_VERSION}/build M=$(pwd) modules
+make -C /lib/modules/"${KERNEL_VERSION}"/build M="$(pwd)" modules
 
 # Copy to output location
 cp neuron.ko /output/

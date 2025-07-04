@@ -155,7 +155,7 @@ done
 echo "Cleaning up dangling images..."
 DANGLING_IMAGES=$(podman images -f "dangling=true" -q)
 if [ -n "${DANGLING_IMAGES}" ]; then
-    podman rmi ${DANGLING_IMAGES} >/dev/null 2>&1 || true
+    podman rmi "${DANGLING_IMAGES}" >/dev/null 2>&1 || true
 else
     echo "No dangling images found"
 fi

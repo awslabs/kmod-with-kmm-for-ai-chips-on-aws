@@ -19,8 +19,8 @@ echo "base_tag,full_tag,pull_url" > kmod_images_ecr.csv
 
 # Single API call with JQ processing and sorting
 aws ecr describe-images \
-    --repository-name ${REPOSITORY} \
-    --region ${REGION} \
+    --repository-name "${REPOSITORY}" \
+    --region "${REGION}" \
     --output json | \
 jq -r '
     .imageDetails[] |
@@ -36,9 +36,9 @@ jq -r '
         empty
     end
 ' | sort -V | while read -r line; do
-    base_tag=$(echo $line | cut -d',' -f3 | tr -d '"')
+    base_tag=$(echo "$line" | cut -d',' -f3 | tr -d '"')
     echo "${line%,*},\"${REGISTRY}/${REPOSITORY}:${base_tag}\"" >> kmod_images_ecr.csv
-    echo "Added: $(echo $line | cut -d',' -f1)"
+    echo "Added: $(echo "$line" | cut -d',' -f1)"
 done
 
 echo "Done! Results written to kmod_images_ecr.csv"
