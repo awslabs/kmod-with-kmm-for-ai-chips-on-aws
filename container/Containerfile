@@ -26,4 +26,6 @@ COPY --from=builder /opt/lib/modules/ /opt/lib/modules/
 
 # Add labels
 LABEL kernel-version=${KERNEL_VERSION} \
-      ocp-version=${OCP_VERSION}
+      ocp-version=${OCP_VERSION} \
+      base-image="public.ecr.aws/docker/library/busybox:stable-musl" \
+      base-image-info="https://hub.docker.com/_/busybox/tags?name=stable-musl"
