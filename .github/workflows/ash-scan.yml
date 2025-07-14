@@ -12,6 +12,8 @@ jobs:
     name: Run ASH Scan
     runs-on: ubuntu-latest
     steps:
+      # Third-party tool: Automated Security Helper (ASH) from awslabs
+      # Used for security scanning to detect secrets and configuration issues
       - name: Checkout ASH
         uses: actions/checkout@v4
         with:
