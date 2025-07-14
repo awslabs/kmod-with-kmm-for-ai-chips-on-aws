@@ -72,7 +72,9 @@ For more information about the Driver Toolkit utilities, see [driver-toolkit/REA
 
 ## Container Security
 
-Our container images are designed with a minimal security footprint. Each image contains only a busybox binary and the compiled AWS Neuron kernel module - no package managers, no network services, and no additional software dependencies.
+Our container images are designed with a minimal security footprint. Each image contains only a [busybox](https://busybox.net) binary and the compiled AWS Neuron kernel module - no package managers, no network services, and no additional software dependencies.
+
+**Base Image**: We use the official `public.ecr.aws/docker/library/busybox:stable-musl` image. Users can review vulnerability scan results and layer details at [Docker Hub](https://hub.docker.com/_/busybox/tags?name=stable-musl&ordering=-name), which provides security scanning information for the base image.
 
 This approach significantly reduces the attack surface, but it also means that traditional vulnerability scanners like Trivy or Snyk have limited effectiveness since they rely on package databases that don't exist in these minimal images. The security of these containers primarily depends on the integrity of the busybox binary and the kernel module compilation process.
 
