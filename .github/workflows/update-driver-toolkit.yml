@@ -76,6 +76,8 @@ jobs:
           fi
         fi
 
+    # Third-party tool: peter-evans/create-pull-request
+    # Used to automate pull request creation for driver toolkit updates
     - name: Create or Update Pull Request
       if: steps.check_pr_and_changes.outputs.should_update == 'true'
       uses: peter-evans/create-pull-request@v7

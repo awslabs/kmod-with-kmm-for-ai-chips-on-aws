@@ -10,5 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Third-party tool: ShellCheck via ludeeus/action-shellcheck
+      # Used for shell script syntax validation and best practices
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
