@@ -70,6 +70,14 @@ For more information about the Driver Toolkit utilities, see [driver-toolkit/REA
 - **Public Access**: No authentication required for pulling images
 - **Automated Releases**: Each driver version gets a GitHub release with usage documentation
 
+## Container Security
+
+Our container images are designed with a minimal security footprint. Each image contains only a busybox binary and the compiled AWS Neuron kernel module - no package managers, no network services, and no additional software dependencies.
+
+This approach significantly reduces the attack surface, but it also means that traditional vulnerability scanners like Trivy or Snyk have limited effectiveness since they rely on package databases that don't exist in these minimal images. The security of these containers primarily depends on the integrity of the busybox binary and the kernel module compilation process.
+
+We recommend that users evaluate these images within their own security frameworks and apply appropriate container runtime security policies for their environments.
+
 ## Prerequisites
 
 ### For GitHub Actions (Automated)
@@ -99,6 +107,16 @@ Defines which driver versions and OCP versions to build:
 
 ### driver-toolkit/driver-toolkit.json
 Auto-generated mapping of OCP versions to DTK images. Updated nightly via GitHub Actions.
+
+## Third-Party Dependencies
+
+This project uses several third-party GitHub Actions to automate workflows:
+
+- [peter-evans/create-pull-request](https://github.com/peter-evans/create-pull-request): Automates pull request creation for driver toolkit updates
+- [ludeeus/action-shellcheck](https://github.com/ludeeus/action-shellcheck): GitHub Action for [ShellCheck](https://www.shellcheck.net/) to validate shell script syntax in pull requests
+- [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper): Security scanning tool for detecting secrets and configuration issues in pull requests
+
+These third-party actions help streamline our build and security processes. Users are encouraged to evaluate these dependencies and implement alternative mechanisms that best suit their organizational requirements and security policies.
 
 ## Manual Usage (Development/Local Environments)
 
@@ -200,4 +218,6 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 
 ## License
 
-This project is licensed under the Apache-2.0 License.
+This project's source code, build scripts, and workflows are licensed under the Apache-2.0 License.
+
+The container images include GPL 2.0 licensed components (busybox and AWS Neuron driver kernel modules). Users should be aware of these license requirements when distributing the container images.
