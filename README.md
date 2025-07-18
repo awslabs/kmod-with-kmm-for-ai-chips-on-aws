@@ -1,3 +1,8 @@
+<!--
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 ## Kmod with KMM for AI Chips on AWS
 
 This repository provides **automated GitHub Actions workflows** and scripts to build 

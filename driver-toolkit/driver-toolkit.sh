@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Function to check if a command exists
 check_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
