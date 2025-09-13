@@ -241,6 +241,11 @@
   },
   {
     "arch": "x86_64",
+    "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:72f5419e276fcf696918c7cec5c86f6cfb3a3cce99ad7ac9862b8e84b7bea8ba",
+    "version": "4.16.48"
+  },
+  {
+    "arch": "x86_64",
     "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:5ade3bb39301509ce941b053f2c943e381b8ea5f6d5337c72a58ee33ff27b391",
     "version": "4.17.0"
   },
@@ -411,7 +416,7 @@
   },
   {
     "arch": "x86_64",
-    "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:46c06c700b923e1af6ede071f72e47b2fe651b853312202dc09da7f525c5d2ab",
+    "dtk": "",
     "version": "4.17.34"
   },
   {
@@ -561,6 +566,11 @@
   },
   {
     "arch": "x86_64",
+    "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:daf9c36c34f10270ee946b5053f33560f27d711ae018172c962d7656132c5a32",
+    "version": "4.18.24"
+  },
+  {
+    "arch": "x86_64",
     "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:fe0322730440f1cbe6fffaaa8cac131b56574bec8abe3ec5b462e17557fecb32",
     "version": "4.19.0"
   },
@@ -618,5 +628,10 @@
     "arch": "x86_64",
     "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:d46827f27ccabb178d2795612d16b6e6aef45d477d164776d3a491a6168bae8e",
     "version": "4.19.11"
+  },
+  {
+    "arch": "x86_64",
+    "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:97212e58a6bc1621334f76b1c5829765dc28a0d1606d446b10ab69ec22d6cfe4",
+    "version": "4.19.12"
   }
 ]
