@@ -191,7 +191,7 @@ manage_github_release() {
         upload_files="$upload_files busybox-1.36.1.tar.gz"
     fi
     if [ "$neuron_downloaded" = "true" ]; then
-        upload_files="$upload_files aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+        upload_files="$upload_files ${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
     fi
     
     if [ -n "$upload_files" ]; then
