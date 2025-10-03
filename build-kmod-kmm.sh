@@ -152,6 +152,17 @@ manage_github_release() {
     fi
     
     echo "GitHub release ${release_name} updated successfully"
+    
+    # Download and attach GPL source archives
+    echo "Downloading GPL source archives..."
+    curl -L https://busybox.net/downloads/busybox-1.36.1.tar.bz2 -o busybox-1.36.1.tar.bz2
+    curl -L "https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${driver_version}.noarch.rpm" -o "aws-neuronx-dkms-${driver_version}.noarch.rpm"
+    
+    echo "Uploading source archives to release..."
+    gh release upload "$release_name" busybox-1.36.1.tar.bz2 "aws-neuronx-dkms-${driver_version}.noarch.rpm" || echo "Warning: Failed to upload source archives"
+    
+    # Clean up downloaded files
+    rm -f busybox-1.36.1.tar.bz2 "aws-neuronx-dkms-${driver_version}.noarch.rpm"
 }
 
 # Function to download and extract Neuron driver source from RPM
@@ -432,6 +443,14 @@ while IFS= read -r entry; do
             --label "neuron-driver-version=${NEURON_DRIVER_VERSION}" \
             --label "kernel-version=${KERNEL_VERSION}" \
             --label "openshift-version=${version}" \
+            --label "busybox.version=1.36.1" \
+            --label "busybox.source=https://busybox.net/downloads/busybox-1.36.1.tar.bz2" \
+            --label "busybox.source.backup=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/busybox-1.36.1.tar.bz2" \
+            --label "busybox.license=GPL-2.0" \
+            --label "busybox.copyright=BusyBox is copyrighted by many authors between 1998-2015" \
+            --label "neuron-driver.source=https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${NEURON_DRIVER_VERSION}.noarch.rpm" \
+            --label "neuron-driver.license=GPL-2.0" \
+            --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
             -t "${GHCR_IMAGE_BASE}:${KERNEL_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
@@ -483,6 +502,14 @@ while IFS= read -r entry; do
             --platform=linux/amd64 \
             --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
             --build-arg OCP_VERSION="${version}" \
+            --label "busybox.version=1.36.1" \
+            --label "busybox.source=https://busybox.net/downloads/busybox-1.36.1.tar.bz2" \
+            --label "busybox.source.backup=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/busybox-1.36.1.tar.bz2" \
+            --label "busybox.license=GPL-2.0" \
+            --label "busybox.copyright=BusyBox is copyrighted by many authors between 1998-2015" \
+            --label "neuron-driver.source=https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${NEURON_DRIVER_VERSION}.noarch.rpm" \
+            --label "neuron-driver.license=GPL-2.0" \
+            --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
             -t "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
