@@ -195,7 +195,7 @@ manage_github_release() {
     fi
     
     if [ -n "$upload_files" ]; then
-        gh release upload "$release_name" $upload_files || echo "Warning: Failed to upload some source archives"
+        gh release upload "$release_name" ${upload_files} || echo "Warning: Failed to upload some source archives"
     else
         echo "Warning: No source archives to upload"
     fi
