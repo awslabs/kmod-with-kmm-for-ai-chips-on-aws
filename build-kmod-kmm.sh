@@ -155,14 +155,53 @@ manage_github_release() {
     
     # Download and attach GPL source archives
     echo "Downloading GPL source archives..."
-    curl -L https://busybox.net/downloads/busybox-1.36.1.tar.bz2 -o busybox-1.36.1.tar.bz2
-    curl -L "https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${driver_version}.noarch.rpm" -o "aws-neuronx-dkms-${driver_version}.noarch.rpm"
     
+    # Download BusyBox source with fallback URLs
+    busybox_downloaded=false
+    for url in "https://busybox.net/downloads/busybox-1.36.1.tar.bz2" "https://git.busybox.net/busybox/snapshot/busybox-1.36.1.tar.bz2"; do
+        echo "Trying to download BusyBox from: $url"
+        if curl -L --insecure --connect-timeout 30 --max-time 300 "$url" -o busybox-1.36.1.tar.bz2; then
+            busybox_downloaded=true
+            break
+        else
+            echo "Failed to download from $url, trying next..."
+        fi
+    done
+    
+    if [ "$busybox_downloaded" = "false" ]; then
+        echo "Warning: Failed to download BusyBox source from all URLs"
+    fi
+    
+    # Create tarball of modified Neuron driver source (with patches applied)
+    neuron_downloaded=false
+    echo "Creating tarball of modified Neuron driver source..."
+    if [ -d "${TEMP_DIR}/usr/src/aws-neuronx-${driver_version}" ]; then
+        cd "${TEMP_DIR}/usr/src"
+        tar -czf "${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz" "aws-neuronx-${driver_version}"
+        neuron_downloaded=true
+        echo "Created modified source tarball with applied patches"
+    else
+        echo "Warning: Modified Neuron driver source not found in build artifacts"
+    fi
+    
+    # Upload available source archives
     echo "Uploading source archives to release..."
-    gh release upload "$release_name" busybox-1.36.1.tar.bz2 "aws-neuronx-dkms-${driver_version}.noarch.rpm" || echo "Warning: Failed to upload source archives"
+    upload_files=""
+    if [ "$busybox_downloaded" = "true" ]; then
+        upload_files="$upload_files busybox-1.36.1.tar.bz2"
+    fi
+    if [ "$neuron_downloaded" = "true" ]; then
+        upload_files="$upload_files aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+    fi
+    
+    if [ -n "$upload_files" ]; then
+        gh release upload "$release_name" $upload_files || echo "Warning: Failed to upload some source archives"
+    else
+        echo "Warning: No source archives to upload"
+    fi
     
     # Clean up downloaded files
-    rm -f busybox-1.36.1.tar.bz2 "aws-neuronx-dkms-${driver_version}.noarch.rpm"
+    rm -f busybox-1.36.1.tar.bz2 "aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
 }
 
 # Function to download and extract Neuron driver source from RPM
@@ -448,7 +487,7 @@ while IFS= read -r entry; do
             --label "busybox.source.backup=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/busybox-1.36.1.tar.bz2" \
             --label "busybox.license=GPL-2.0" \
             --label "busybox.copyright=BusyBox is copyrighted by many authors between 1998-2015" \
-            --label "neuron-driver.source=https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${NEURON_DRIVER_VERSION}.noarch.rpm" \
+            --label "neuron-driver.source=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/aws-neuronx-dkms-${NEURON_DRIVER_VERSION}-modified-source.tar.gz" \
             --label "neuron-driver.license=GPL-2.0" \
             --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
@@ -507,7 +546,7 @@ while IFS= read -r entry; do
             --label "busybox.source.backup=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/busybox-1.36.1.tar.bz2" \
             --label "busybox.license=GPL-2.0" \
             --label "busybox.copyright=BusyBox is copyrighted by many authors between 1998-2015" \
-            --label "neuron-driver.source=https://yum.repos.neuron.amazonaws.com/aws-neuronx-dkms-${NEURON_DRIVER_VERSION}.noarch.rpm" \
+            --label "neuron-driver.source=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/aws-neuronx-dkms-${NEURON_DRIVER_VERSION}-modified-source.tar.gz" \
             --label "neuron-driver.license=GPL-2.0" \
             --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
