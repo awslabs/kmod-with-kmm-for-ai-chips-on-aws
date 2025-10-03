@@ -158,9 +158,9 @@ manage_github_release() {
     
     # Download BusyBox source with fallback URLs
     busybox_downloaded=false
-    for url in "https://busybox.net/downloads/busybox-1.36.1.tar.bz2" "https://git.busybox.net/busybox/snapshot/busybox-1.36.1.tar.bz2"; do
+    for url in "https://github.com/mirror/busybox/archive/refs/tags/1_36_1.tar.gz" "https://git.busybox.net/busybox/snapshot/busybox-1.36.1.tar.bz2"; do
         echo "Trying to download BusyBox from: $url"
-        if curl -L --insecure --connect-timeout 30 --max-time 300 "$url" -o busybox-1.36.1.tar.bz2; then
+        if curl -L --connect-timeout 30 --max-time 300 "$url" -o busybox-1.36.1.tar.gz; then
             busybox_downloaded=true
             break
         else
@@ -188,10 +188,10 @@ manage_github_release() {
     echo "Uploading source archives to release..."
     upload_files=""
     if [ "$busybox_downloaded" = "true" ]; then
-        upload_files="$upload_files busybox-1.36.1.tar.bz2"
+        upload_files="$upload_files busybox-1.36.1.tar.gz"
     fi
     if [ "$neuron_downloaded" = "true" ]; then
-        upload_files="$upload_files aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+        upload_files="$upload_files ${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
     fi
     
     if [ -n "$upload_files" ]; then
@@ -202,7 +202,7 @@ manage_github_release() {
     fi
     
     # Clean up downloaded files
-    rm -f busybox-1.36.1.tar.bz2 "aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+    rm -f busybox-1.36.1.tar.gz "aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
 }
 
 # Function to download and extract Neuron driver source from RPM
