@@ -188,7 +188,7 @@ manage_github_release() {
     echo "Uploading source archives to release..."
     upload_files=""
     if [ "$busybox_downloaded" = "true" ]; then
-        upload_files="$upload_files busybox-1.36.1.tar.gz"
+        upload_files="$upload_files ${GITHUB_WORKSPACE}/busybox-1.36.1.tar.gz"
     fi
     if [ "$neuron_downloaded" = "true" ]; then
         upload_files="$upload_files ${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
@@ -202,7 +202,7 @@ manage_github_release() {
     fi
     
     # Clean up downloaded files
-    rm -f busybox-1.36.1.tar.gz "aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+    rm -f "${GITHUB_WORKSPACE}/busybox-1.36.1.tar.gz" "${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
 }
 
 # Function to download and extract Neuron driver source from RPM
@@ -585,15 +585,19 @@ while IFS= read -r entry; do
     
 done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 
+# Final cleanup
+echo "Cleaning up temporary directory..."
+if ! is_github_actions; then
+    rm -rf "${TEMP_DIR}"
+fi
+
 # Update GitHub release after all builds complete (GitHub Actions only)
 if is_github_actions; then
     echo "Updating GitHub release for Neuron driver version ${NEURON_DRIVER_VERSION}..."
     manage_github_release "${NEURON_DRIVER_VERSION}"
+    # Clean up temp directory after release management
+    rm -rf "${TEMP_DIR}"
 fi
-
-# Final cleanup
-echo "Cleaning up temporary directory..."
-rm -rf "${TEMP_DIR}"
 
 # Clean up any dangling images (those with <none> as repository and tag)
 echo "Cleaning up dangling images..."
