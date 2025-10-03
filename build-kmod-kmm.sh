@@ -597,6 +597,7 @@ rm -rf "${TEMP_DIR}"
 
 # Clean up any dangling images (those with <none> as repository and tag)
 echo "Cleaning up dangling images..."
+cd "${GITHUB_WORKSPACE}" || cd /tmp
 DANGLING_IMAGES=$(podman images -f "dangling=true" -q)
 if [ -n "${DANGLING_IMAGES}" ]; then
     podman rmi "${DANGLING_IMAGES}" || true
