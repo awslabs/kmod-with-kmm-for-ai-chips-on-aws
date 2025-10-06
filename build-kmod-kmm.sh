@@ -160,7 +160,7 @@ manage_github_release() {
     busybox_downloaded=false
     for url in "https://github.com/mirror/busybox/archive/refs/tags/1_36_1.tar.gz" "https://git.busybox.net/busybox/snapshot/busybox-1.36.1.tar.bz2"; do
         echo "Trying to download BusyBox from: $url"
-        if curl -L --connect-timeout 30 --max-time 300 "$url" -o busybox-1.36.1.tar.gz; then
+        if curl -L --connect-timeout 30 --max-time 300 "$url" -o "${GITHUB_WORKSPACE}/busybox-1.36.1.tar.gz"; then
             busybox_downloaded=true
             break
         else
@@ -195,6 +195,8 @@ manage_github_release() {
     fi
     
     if [ -n "$upload_files" ]; then
+        # Ensure we're in the git repository for gh command
+        cd "${GITHUB_WORKSPACE}"
         # shellcheck disable=SC2086
         gh release upload "${release_name}" ${upload_files} || echo "Warning: Failed to upload some source archives"
     else
