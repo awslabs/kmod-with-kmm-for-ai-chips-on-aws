@@ -10,6 +10,12 @@ on:
       - 'build-matrix.json'
       - 'driver-toolkit/driver-toolkit.json'
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force rebuild existing images'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   setup-matrix:
@@ -45,6 +51,7 @@ jobs:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_BUILD: ${{ inputs.force_build }}
         run: |
           echo "Building for driver: ${{ matrix.driver }}"
           echo "OCP versions: ${{ join(matrix.ocp_versions, ', ') }}"
