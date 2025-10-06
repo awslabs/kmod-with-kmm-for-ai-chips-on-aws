@@ -158,9 +158,10 @@ manage_github_release() {
     
     # Download BusyBox source with fallback URLs
     busybox_downloaded=false
+    cd "${GITHUB_WORKSPACE}"
     for url in "https://github.com/mirror/busybox/archive/refs/tags/1_36_1.tar.gz" "https://git.busybox.net/busybox/snapshot/busybox-1.36.1.tar.bz2"; do
         echo "Trying to download BusyBox from: $url"
-        if curl -L --connect-timeout 30 --max-time 300 "$url" -o "${GITHUB_WORKSPACE}/busybox-1.36.1.tar.gz"; then
+        if curl -L --connect-timeout 30 --max-time 300 "$url" -o "busybox-1.36.1.tar.gz"; then
             busybox_downloaded=true
             break
         else
@@ -178,6 +179,7 @@ manage_github_release() {
     if [ -d "${TEMP_DIR}/usr/src/aws-neuronx-${driver_version}" ]; then
         cd "${TEMP_DIR}/usr/src"
         tar -czf "${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz" "aws-neuronx-${driver_version}"
+        cd "${GITHUB_WORKSPACE}"
         neuron_downloaded=true
         echo "Created modified source tarball with applied patches"
     else
@@ -188,15 +190,13 @@ manage_github_release() {
     echo "Uploading source archives to release..."
     upload_files=""
     if [ "$busybox_downloaded" = "true" ]; then
-        upload_files="$upload_files ${GITHUB_WORKSPACE}/busybox-1.36.1.tar.gz"
+        upload_files="$upload_files busybox-1.36.1.tar.gz"
     fi
     if [ "$neuron_downloaded" = "true" ]; then
-        upload_files="$upload_files ${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+        upload_files="$upload_files aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
     fi
     
     if [ -n "$upload_files" ]; then
-        # Ensure we're in the git repository for gh command
-        cd "${GITHUB_WORKSPACE}"
         # shellcheck disable=SC2086
         gh release upload "${release_name}" ${upload_files} || echo "Warning: Failed to upload some source archives"
     else
@@ -204,7 +204,7 @@ manage_github_release() {
     fi
     
     # Clean up downloaded files
-    rm -f "${GITHUB_WORKSPACE}/busybox-1.36.1.tar.gz" "${GITHUB_WORKSPACE}/aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
+    rm -f "busybox-1.36.1.tar.gz" "aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
 }
 
 # Function to download and extract Neuron driver source from RPM
