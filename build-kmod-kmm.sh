@@ -93,6 +93,7 @@ version_matches() {
 # Function to manage GitHub release for a Neuron driver version
 manage_github_release() {
     local driver_version="$1"
+    local kernel_versions_file="$2"
     local release_name="neuron-driver-${driver_version}"
     
     echo "Managing GitHub release: ${release_name}"
@@ -132,9 +133,6 @@ Select the image that matches your worker nodes kernel version or your OpenShift
     release_notes+="
 ### Kernel-specific Tags (for exact kernel matching)
 "
-    
-    # Read built kernel versions from temp file
-    local kernel_versions_file="${TEMP_DIR}/kernel_versions.txt"
     
     # Add actual kernel-specific tags from build results
     if [ -f "${kernel_versions_file}" ] && [ -s "${kernel_versions_file}" ]; then
@@ -718,7 +716,7 @@ done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 # Update GitHub release after all builds complete (GitHub Actions only)
 if is_github_actions; then
     echo "Updating GitHub release for Neuron driver version ${NEURON_DRIVER_VERSION}..."
-    manage_github_release "${NEURON_DRIVER_VERSION}"
+    manage_github_release "${NEURON_DRIVER_VERSION}" "${TEMP_DIR}/kernel_versions.txt"
 fi
 
 # Final cleanup
