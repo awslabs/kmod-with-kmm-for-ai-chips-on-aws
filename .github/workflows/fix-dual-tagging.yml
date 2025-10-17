@@ -1,0 +1,47 @@
+name: Fix Dual Tagging
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (check only, no changes)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  fix-dual-tagging:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::471112966844:role/GitHubActionsECRPublicRole
+        role-session-name: GitHubActions-FixDualTagging
+        aws-region: us-east-1
+        role-duration-seconds: 3600
+    
+    - name: Install Podman
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman
+    
+    - name: Fix dual tagging
+      env:
+        QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+        QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+      run: |
+        if [ "${{ inputs.dry_run }}" = "true" ]; then
+          echo "DRY RUN MODE: Would fix dual tagging issues"
+          # Add dry run logic here if needed
+        else
+          ./scripts/fix-dual-tagging.sh
+        fi

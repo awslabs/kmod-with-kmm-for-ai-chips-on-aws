@@ -93,7 +93,6 @@ version_matches() {
 # Function to manage GitHub release for a Neuron driver version
 manage_github_release() {
     local driver_version="$1"
-    local kernel_versions_file="$2"
     local release_name="neuron-driver-${driver_version}"
     
     echo "Managing GitHub release: ${release_name}"
@@ -134,24 +133,23 @@ Select the image that matches your worker nodes kernel version or your OpenShift
 ### Kernel-specific Tags (for exact kernel matching)
 "
     
-    # Add actual kernel-specific tags from build results
-    if [ -f "${kernel_versions_file}" ] && [ -s "${kernel_versions_file}" ]; then
-        echo "Found kernel versions file with content:"
-        cat "${kernel_versions_file}"
-        while IFS='|' read -r ocp_version kernel_version; do
-            if [ -n "${ocp_version}" ] && [ -n "${kernel_version}" ]; then
-                release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${kernel_version}\` (for OCP ${ocp_version})
+    # Generate kernel-specific tags from driver-toolkit.json (same as OCP tags)
+    # Since we use dual tagging, every OCP version has a corresponding kernel tag
+    echo "Generating kernel-specific tags from driver-toolkit.json"
+    while IFS= read -r entry; do
+        local ocp_version
+        ocp_version=$(echo "$entry" | jq -r '.version')
+        local dtk_image
+        dtk_image=$(echo "$entry" | jq -r '.dtk')
+        
+        # Extract kernel version from DTK image for this OCP version
+        if KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}" 2>/dev/null); then
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${KERNEL_VERSION}\` (for OCP ${ocp_version})
 "
-            fi
-        done < "${kernel_versions_file}"
-    else
-        echo "Warning: Kernel versions file not found or empty, skipping kernel-specific tags section"
-        if [ -f "${kernel_versions_file}" ]; then
-            echo "File exists but is empty"
         else
-            echo "File does not exist at: ${kernel_versions_file}"
+            echo "Warning: Could not extract kernel version for OCP ${ocp_version}, skipping kernel tag" >&2
         fi
-    fi
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
     
     if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
         echo "No OCP versions found in driver-toolkit.json"
@@ -554,28 +552,48 @@ while IFS= read -r entry; do
     if is_github_actions; then
         echo "GitHub Actions: Processing OCP version $version"
         
-        # Early check using OCP version tag before DTK download
-        OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
-        OCP_IMAGE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${OCP_TAG}"
+        # Get DTK image from Quay.io (from JSON entry) - needed for both build and skip scenarios
+        dtk_image=$(echo "$entry" | jq -r '.dtk')
         
-        if [ "${FORCE_BUILD}" != "true" ] && podman pull "${OCP_IMAGE}" >/dev/null 2>&1; then
-            echo "Image already exists for OCP ${version}, skipping build..."
-            podman rmi "${OCP_IMAGE}" >/dev/null 2>&1 || true
-            
-            # Still need to extract kernel version for release notes
-            dtk_image=$(echo "$entry" | jq -r '.dtk')
-            
-            if KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
-                echo "Storing kernel version for existing image: ${version}|${KERNEL_VERSION}"
-                echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
-            else
-                echo "Warning: Could not extract kernel version from DTK image"
-            fi
+        # Extract kernel version first (needed for both tags)
+        if ! KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
+            echo "Error: Failed to extract kernel version from DTK image for OCP ${version}"
             continue
         fi
         
-        # Get DTK image from Quay.io (from JSON entry)
-        dtk_image=$(echo "$entry" | jq -r '.dtk')
+        # Define both tags
+        KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
+        OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
+        ECR_IMAGE_BASE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module"
+        
+        # Check if BOTH tags already exist (proper dual tagging check)
+        kernel_exists=false
+        ocp_exists=false
+        
+        if [ "${FORCE_BUILD}" != "true" ]; then
+            if podman pull "${ECR_IMAGE_BASE}:${KERNEL_TAG}" >/dev/null 2>&1; then
+                kernel_exists=true
+                podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" >/dev/null 2>&1 || true
+            fi
+            if podman pull "${ECR_IMAGE_BASE}:${OCP_TAG}" >/dev/null 2>&1; then
+                ocp_exists=true
+                podman rmi "${ECR_IMAGE_BASE}:${OCP_TAG}" >/dev/null 2>&1 || true
+            fi
+        fi
+        
+        # Skip build only if BOTH tags exist
+        if [ "${FORCE_BUILD}" != "true" ] && [ "${kernel_exists}" = "true" ] && [ "${ocp_exists}" = "true" ]; then
+            echo "Both kernel and OCP tags already exist for OCP ${version}, skipping build..."
+            echo "Storing kernel version for existing image: ${version}|${KERNEL_VERSION}"
+            echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
+            continue
+        fi
+        
+        # If only one tag exists, we need to rebuild to ensure proper dual tagging
+        if [ "${kernel_exists}" = "true" ] || [ "${ocp_exists}" = "true" ]; then
+            echo "Warning: Only partial tagging found for OCP ${version} (kernel_exists=${kernel_exists}, ocp_exists=${ocp_exists})"
+            echo "Rebuilding to ensure proper dual tagging..."
+        fi
         
         # Build kernel module for this version (disable exit-on-error to capture return code)
         set +e
@@ -591,13 +609,6 @@ while IFS= read -r entry; do
         # Store kernel version for release notes
         echo "Storing kernel version: ${version}|${KERNEL_VERSION}"
         echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
-        echo "Current kernel_versions.txt content:"
-        cat "${TEMP_DIR}/kernel_versions.txt" || echo "File not found or empty"
-        
-        # Create ECR Public tags - primary (kernel-based) and secondary (OCP-based)
-        KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
-        OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
-        ECR_IMAGE_BASE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module"
         
         # Build final image with primary tag
         echo "Building final image with tags: ${KERNEL_TAG}, ${OCP_TAG}"
@@ -716,7 +727,7 @@ done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 # Update GitHub release after all builds complete (GitHub Actions only)
 if is_github_actions; then
     echo "Updating GitHub release for Neuron driver version ${NEURON_DRIVER_VERSION}..."
-    manage_github_release "${NEURON_DRIVER_VERSION}" "${TEMP_DIR}/kernel_versions.txt"
+    manage_github_release "${NEURON_DRIVER_VERSION}"
 fi
 
 # Final cleanup
