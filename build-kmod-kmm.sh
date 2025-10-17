@@ -399,9 +399,13 @@ else
     fi
     
     # Authenticate with ECR Public for pushing images (required in GitHub Actions)
+    # Note: ECR Public only operates in us-east-1 region
     echo "Logging into ECR Public..."
-    aws ecr-public get-login-password --region us-east-1 | \
-        podman login --username AWS --password-stdin public.ecr.aws
+    if ! aws ecr-public get-login-password --region us-east-1 --no-cli-pager | \
+        podman login --username AWS --password-stdin public.ecr.aws; then
+        echo "Error: Failed to authenticate with ECR Public"
+        exit 1
+    fi
 fi
 
 # Store the original script directory before changing directories
