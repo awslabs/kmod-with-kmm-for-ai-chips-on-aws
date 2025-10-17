@@ -104,35 +104,32 @@ manage_github_release() {
     # Generate expected tags based on driver-toolkit.json
     echo "Generating expected tags for driver version ${driver_version}"
     
-    local all_tags=""
+    # Create release notes with proper markdown formatting
+    local release_notes
+    release_notes="Container images for AWS Neuron driver version ${driver_version} compatible with various OpenShift releases and kernel versions.
+
+## Usage
+
+These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.
+Select the image that matches your worker nodes kernel version or your OpenShift version:
+- Use kernel-based tags (e.g., \`${driver_version}-5.14.0-...\`) to match specific kernel versions
+- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18.0\`) to match your OpenShift version
+
+## Available Images
+"
+    
+    # Add each image as a separate line
     while IFS= read -r entry; do
         local ocp_version
         ocp_version=$(echo "$entry" | jq -r '.version')
-        all_tags+="${driver_version}-ocp${ocp_version}\n"
+        release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}\`
+"
     done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
     
-    if [ -z "$all_tags" ]; then
+    if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
         echo "No OCP versions found in driver-toolkit.json"
         return 0
     fi
-    
-    # Create release notes
-    local release_notes
-    release_notes="Container images for AWS Neuron driver version ${driver_version} compatible with various OpenShift releases and kernel versions.\n\n"
-
-    release_notes+="## Usage\n\n"
-    release_notes+="These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.\n"
-    release_notes+="Select the image that matches your worker nodes kernel version or your OpenShift version:\n"
-    release_notes+="- Use kernel-based tags (e.g., \`${driver_version}-5.14.0-...\`) to match specific kernel versions\n"
-    release_notes+="- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18.0\`) to match your OpenShift version\n"
-
-    release_notes+="## Available Images\n\n"
-    
-    while IFS= read -r tag; do
-        if [ -n "$tag" ]; then
-            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${tag}\`\n"
-        fi
-    done <<< "$all_tags"
     
     # Check if release needs updating
     if gh release view "$release_name" >/dev/null 2>&1; then
