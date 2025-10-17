@@ -113,18 +113,38 @@ manage_github_release() {
 These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.
 Select the image that matches your worker nodes kernel version or your OpenShift version:
 - Use kernel-based tags (e.g., \`${driver_version}-5.14.0-...\`) to match specific kernel versions
-- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18.0\`) to match your OpenShift version
+- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18\`) to match your OpenShift version
 
 ## Available Images
+
+### OCP-specific Tags (recommended for broad compatibility)
 "
     
-    # Add each image as a separate line
+    # Add OCP-specific tags
     while IFS= read -r entry; do
         local ocp_version
         ocp_version=$(echo "$entry" | jq -r '.version')
         release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}\`
 "
     done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    
+    # Add kernel-specific tags section
+    release_notes+="
+### Kernel-specific Tags (for exact kernel matching)
+"
+    
+    # Read built kernel versions from temp file
+    local kernel_versions_file="${TEMP_DIR}/kernel_versions.txt"
+    
+    # Add actual kernel-specific tags from build results
+    if [ -f "${kernel_versions_file}" ]; then
+        while IFS='|' read -r ocp_version kernel_version; do
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${kernel_version}\` (for OCP ${ocp_version})
+"
+        done < "${kernel_versions_file}"
+    else
+        echo "Warning: Kernel versions file not found, skipping kernel-specific tags section"
+    fi
     
     if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
         echo "No OCP versions found in driver-toolkit.json"
@@ -462,6 +482,9 @@ while IFS= read -r entry; do
             echo "Build failed for OCP version $version, exiting..."
             exit $build_result
         fi
+        
+        # Store kernel version for release notes
+        echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
         
         # Create ECR Public tags - primary (kernel-based) and secondary (OCP-based)
         KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
