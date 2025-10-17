@@ -715,19 +715,15 @@ while IFS= read -r entry; do
     
 done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
 
-# Final cleanup
-echo "Cleaning up temporary directory..."
-if ! is_github_actions; then
-    rm -rf "${TEMP_DIR}"
-fi
-
 # Update GitHub release after all builds complete (GitHub Actions only)
 if is_github_actions; then
     echo "Updating GitHub release for Neuron driver version ${NEURON_DRIVER_VERSION}..."
     manage_github_release "${NEURON_DRIVER_VERSION}"
-    # Clean up temp directory after release management
-    rm -rf "${TEMP_DIR}"
 fi
+
+# Final cleanup
+echo "Cleaning up temporary directory..."
+rm -rf "${TEMP_DIR}"
 
 # Clean up any dangling images (those with <none> as repository and tag)
 echo "Cleaning up dangling images..."
