@@ -100,18 +100,19 @@ manage_github_release() {
     # Change to repository root for GitHub CLI operations
     cd "${GITHUB_WORKSPACE}"
     
-    # Query GHCR for all images matching this driver version
-    echo "Querying GHCR for images matching neuron-driver:${driver_version}-*"
+    # Note: ECR Public doesn't have API for listing tags like GHCR
+    # Generate expected tags based on driver-toolkit.json
+    echo "Generating expected tags for driver version ${driver_version}"
     
-    # Get all unique tags with pagination and sort them
-    local all_tags
-    all_tags=$(gh api --paginate \
-        "/orgs/awslabs/packages/container/kmod-with-kmm-for-ai-chips-on-aws%2Fneuron-driver/versions" \
-        --jq ".[] | select(.metadata.container.tags[]? | startswith(\"${driver_version}-\")) | .metadata.container.tags[]" \
-        2>/dev/null | sort -u || echo "")
+    local all_tags=""
+    while IFS= read -r entry; do
+        local ocp_version
+        ocp_version=$(echo "$entry" | jq -r '.version')
+        all_tags+="${driver_version}-ocp${ocp_version}\n"
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
     
     if [ -z "$all_tags" ]; then
-        echo "No images found for driver version ${driver_version}"
+        echo "No OCP versions found in driver-toolkit.json"
         return 0
     fi
     
@@ -129,7 +130,7 @@ manage_github_release() {
     
     while IFS= read -r tag; do
         if [ -n "$tag" ]; then
-            release_notes+="- \`ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${tag}\`\n"
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${tag}\`\n"
         fi
     done <<< "$all_tags"
     
@@ -397,15 +398,12 @@ else
         exit 1
     fi
     
-    # Authenticate with GHCR for pushing images (required in GitHub Actions)
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        echo "Logging into GHCR..."
-        set +x
-        echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-        set -x
-    else
-        echo "Error: GITHUB_TOKEN environment variable is required in GitHub Actions"
-        echo "This token is needed to push images to ghcr.io"
+    # Authenticate with ECR Public for pushing images (required in GitHub Actions)
+    # Note: ECR Public only operates in us-east-1 region
+    echo "Logging into ECR Public..."
+    if ! aws ecr-public get-login-password --region us-east-1 --no-cli-pager | \
+        podman login --username AWS --password-stdin public.ecr.aws; then
+        echo "Error: Failed to authenticate with ECR Public"
         exit 1
     fi
 fi
@@ -446,7 +444,7 @@ while IFS= read -r entry; do
         
         # Early check using OCP version tag before DTK download
         OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
-        OCP_IMAGE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver:${OCP_TAG}"
+        OCP_IMAGE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${OCP_TAG}"
         
         if [ "${FORCE_BUILD}" != "true" ] && podman pull "${OCP_IMAGE}" >/dev/null 2>&1; then
             echo "Image already exists for OCP ${version}, skipping build..."
@@ -468,10 +466,10 @@ while IFS= read -r entry; do
             exit $build_result
         fi
         
-        # Create GHCR tags - primary (kernel-based) and secondary (OCP-based)
+        # Create ECR Public tags - primary (kernel-based) and secondary (OCP-based)
         KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
         OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
-        GHCR_IMAGE_BASE="ghcr.io/awslabs/kmod-with-kmm-for-ai-chips-on-aws/neuron-driver"
+        ECR_IMAGE_BASE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module"
         
         # Build final image with primary tag
         echo "Building final image with tags: ${KERNEL_TAG}, ${OCP_TAG}"
@@ -494,23 +492,23 @@ while IFS= read -r entry; do
             --label "neuron-driver.license=GPL-2.0" \
             --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
-            -t "${GHCR_IMAGE_BASE}:${KERNEL_TAG}" \
+            -t "${ECR_IMAGE_BASE}:${KERNEL_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
             "${OUTPUT_DIR}"
         
         # Add secondary OCP-based tag to same image
         IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman tag "${IMAGE_ID}" "${GHCR_IMAGE_BASE}:${OCP_TAG}"
+        podman tag "${IMAGE_ID}" "${ECR_IMAGE_BASE}:${OCP_TAG}"
         
-        # Push both tags to GHCR
-        echo "Pushing images to GHCR..."
-        podman push "${GHCR_IMAGE_BASE}:${KERNEL_TAG}"
-        podman push "${GHCR_IMAGE_BASE}:${OCP_TAG}"
+        # Push both tags to ECR Public
+        echo "Pushing images to ECR Public..."
+        podman push "${ECR_IMAGE_BASE}:${KERNEL_TAG}"
+        podman push "${ECR_IMAGE_BASE}:${OCP_TAG}"
         
         # Clean up the built image
         echo "Cleaning up built image..."
-        podman rmi "${GHCR_IMAGE_BASE}:${KERNEL_TAG}" || true
-        podman rmi "${GHCR_IMAGE_BASE}:${OCP_TAG}" || true
+        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" || true
+        podman rmi "${ECR_IMAGE_BASE}:${OCP_TAG}" || true
         podman rmi "${IMAGE_ID}" || true
         
         echo "Build completed successfully for OCP version $version"
