@@ -133,27 +133,18 @@ Select the image that matches your worker nodes kernel version or your OpenShift
 ### Kernel-specific Tags (for exact kernel matching)
 "
     
-    # Add kernel-specific tags based on DTK entries
-    while IFS= read -r entry; do
-        local ocp_version dtk_image kernel_version
-        ocp_version=$(echo "$entry" | jq -r '.version')
-        dtk_image=$(echo "$entry" | jq -r '.dtk')
-        
-        # Extract kernel version from DTK image name (format: registry.redhat.io/ubi8/driver-toolkit:v4.x.y-z)
-        # The kernel version is typically embedded in the DTK image tag
-        if [[ $dtk_image =~ driver-toolkit:v([0-9]+\.[0-9]+\.[0-9]+-[^[:space:]]+) ]]; then
-            # For now, show placeholder since we can't easily extract kernel version without pulling image
-            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-<kernel-version>\` (for OCP ${ocp_version})
-"
-        else
-            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-<kernel-version>\` (for OCP ${ocp_version})
-"
-        fi
-    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    # Read built kernel versions from temp file
+    local kernel_versions_file="${TEMP_DIR}/kernel_versions.txt"
     
-    release_notes+="
-Note: Replace \`<kernel-version>\` with your actual kernel version (e.g., \`5.14.0-427.13.1.el9_4.x86_64\`).
+    # Add actual kernel-specific tags from build results
+    if [ -f "${kernel_versions_file}" ]; then
+        while IFS='|' read -r ocp_version kernel_version; do
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${kernel_version}\` (for OCP ${ocp_version})
 "
+        done < "${kernel_versions_file}"
+    else
+        echo "Warning: Kernel versions file not found, skipping kernel-specific tags section"
+    fi
     
     if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
         echo "No OCP versions found in driver-toolkit.json"
@@ -491,6 +482,9 @@ while IFS= read -r entry; do
             echo "Build failed for OCP version $version, exiting..."
             exit $build_result
         fi
+        
+        # Store kernel version for release notes
+        echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
         
         # Create ECR Public tags - primary (kernel-based) and secondary (OCP-based)
         KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
