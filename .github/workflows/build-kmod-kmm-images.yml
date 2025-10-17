@@ -33,6 +33,9 @@ jobs:
   build:
     needs: setup-matrix
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         include: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
@@ -40,6 +43,12 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
       
       - name: Install container tools and RPM utilities
         run: |

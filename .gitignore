@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 kmod_images_ecr.csv
-
+.vscode
 # Binaries and installation files
 *.tar.gz
 oc
