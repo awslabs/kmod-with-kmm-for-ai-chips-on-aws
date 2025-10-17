@@ -477,7 +477,7 @@ chmod +x "${TEMP_DIR}/build-module.sh"
 # Initialize kernel versions file for GitHub Actions
 if is_github_actions; then
     echo "Initializing kernel versions file..."
-    > "${TEMP_DIR}/kernel_versions.txt"
+    touch "${TEMP_DIR}/kernel_versions.txt"
 fi
 
 # Process driver-toolkit.json with environment-specific logic
