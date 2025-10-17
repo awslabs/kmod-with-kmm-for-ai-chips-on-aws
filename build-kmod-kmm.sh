@@ -238,20 +238,87 @@ Select the image that matches your worker nodes kernel version or your OpenShift
 extract_kernel_version_from_dtk() {
     local dtk_image="$1"
     
-    echo "Extracting kernel version from DTK image: ${dtk_image}"
-    podman pull "${dtk_image}" >/dev/null
+    # Validate input
+    if [ -z "${dtk_image}" ]; then
+        echo "Error: DTK image parameter is required" >&2
+        return 1
+    fi
     
-    local kernel_version
-    kernel_version=$(podman run --rm "${dtk_image}" bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
+    echo "Extracting kernel version from DTK image: ${dtk_image}" >&2
     
-    # Clean up DTK image
-    podman rmi "${dtk_image}" >/dev/null 2>&1 || true
-    
-    if [ -n "${kernel_version}" ]; then
-        echo "${kernel_version}"
-        return 0
+    # Pull image with error handling (only if not already present)
+    if ! podman image exists "${dtk_image}" 2>/dev/null; then
+        echo "Pulling DTK image: ${dtk_image}" >&2
+        if ! podman pull "${dtk_image}" >/dev/null 2>&1; then
+            echo "Error: Failed to pull DTK image: ${dtk_image}" >&2
+            return 1
+        fi
     else
-        echo "Error: Could not extract kernel version from DTK image" >&2
+        echo "DTK image already present: ${dtk_image}" >&2
+    fi
+    
+    # Create unique temp file (avoid race conditions)
+    local temp_json
+    temp_json=$(mktemp "${TEMP_DIR}/dtk-release-XXXXXX.json") || {
+        echo "Error: Failed to create temporary file" >&2
+        return 1
+    }
+    
+    # Create temporary container with error handling
+    local temp_container
+    if ! temp_container=$(podman create "${dtk_image}" 2>/dev/null); then
+        echo "Error: Failed to create temporary container from DTK image" >&2
+        rm -f "${temp_json}"
+        return 1
+    fi
+    
+    # Copy file with comprehensive error handling
+    local copy_success=false
+    if podman cp "${temp_container}:/etc/driver-toolkit-release.json" "${temp_json}" >/dev/null 2>&1; then
+        copy_success=true
+    fi
+    
+    # Always clean up container immediately
+    podman rm "${temp_container}" >/dev/null 2>&1 || true
+    
+    # Check if copy was successful
+    if [ "${copy_success}" != "true" ]; then
+        echo "Error: Could not copy driver-toolkit-release.json from DTK image" >&2
+        rm -f "${temp_json}"
+        return 1
+    fi
+    
+    # Validate temp file exists and is readable
+    if [ ! -f "${temp_json}" ] || [ ! -r "${temp_json}" ]; then
+        echo "Error: Temporary JSON file is not accessible" >&2
+        rm -f "${temp_json}"
+        return 1
+    fi
+    
+    # Parse JSON with error handling
+    local kernel_version
+    if ! kernel_version=$(jq -r '.KERNEL_VERSION // empty' "${temp_json}" 2>/dev/null); then
+        echo "Error: Failed to parse JSON file or jq not available" >&2
+        rm -f "${temp_json}"
+        return 1
+    fi
+    
+    # Clean up temp file
+    rm -f "${temp_json}"
+    
+    # Validate kernel version format (basic sanity check)
+    if [ -n "${kernel_version}" ] && [ "${kernel_version}" != "null" ] && [ "${kernel_version}" != "empty" ]; then
+        # Basic format validation: should contain version numbers and dots
+        if [[ "${kernel_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Successfully extracted kernel version: ${kernel_version}" >&2
+            echo "${kernel_version}"
+            return 0
+        else
+            echo "Error: Invalid kernel version format: ${kernel_version}" >&2
+            return 1
+        fi
+    else
+        echo "Error: Could not extract valid kernel version from DTK image" >&2
         return 1
     fi
 }
@@ -297,10 +364,6 @@ build_kernel_module_for_version() {
     local dtk_image="$2"
     
     echo "Processing OCP version: ${version}"
-    
-    # Pull the DTK image
-    echo "Pulling DTK image: ${dtk_image}"
-    podman pull "${dtk_image}" >/dev/null
     
     # Get the image ID of the DTK image for later cleanup - using a more reliable method
     DTK_IMAGE_ID=$(podman inspect --format '{{.Id}}' "${dtk_image}" 2>/dev/null || podman images --format "{{.ID}}" --filter "reference=${dtk_image}")
