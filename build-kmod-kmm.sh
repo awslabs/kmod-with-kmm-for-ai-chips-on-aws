@@ -137,13 +137,22 @@ Select the image that matches your worker nodes kernel version or your OpenShift
     local kernel_versions_file="${TEMP_DIR}/kernel_versions.txt"
     
     # Add actual kernel-specific tags from build results
-    if [ -f "${kernel_versions_file}" ]; then
+    if [ -f "${kernel_versions_file}" ] && [ -s "${kernel_versions_file}" ]; then
+        echo "Found kernel versions file with content:"
+        cat "${kernel_versions_file}"
         while IFS='|' read -r ocp_version kernel_version; do
-            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${kernel_version}\` (for OCP ${ocp_version})
+            if [ -n "${ocp_version}" ] && [ -n "${kernel_version}" ]; then
+                release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${kernel_version}\` (for OCP ${ocp_version})
 "
+            fi
         done < "${kernel_versions_file}"
     else
-        echo "Warning: Kernel versions file not found, skipping kernel-specific tags section"
+        echo "Warning: Kernel versions file not found or empty, skipping kernel-specific tags section"
+        if [ -f "${kernel_versions_file}" ]; then
+            echo "File exists but is empty"
+        else
+            echo "File does not exist at: ${kernel_versions_file}"
+        fi
     fi
     
     if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
@@ -225,6 +234,28 @@ Select the image that matches your worker nodes kernel version or your OpenShift
     rm -f "busybox-1.36.1.tar.gz" "aws-neuronx-dkms-${driver_version}-modified-source.tar.gz"
 }
 
+# Function to extract kernel version from DTK image
+extract_kernel_version_from_dtk() {
+    local dtk_image="$1"
+    
+    echo "Extracting kernel version from DTK image: ${dtk_image}"
+    podman pull "${dtk_image}" >/dev/null
+    
+    local kernel_version
+    kernel_version=$(podman run --rm "${dtk_image}" bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
+    
+    # Clean up DTK image
+    podman rmi "${dtk_image}" >/dev/null 2>&1 || true
+    
+    if [ -n "${kernel_version}" ]; then
+        echo "${kernel_version}"
+        return 0
+    else
+        echo "Error: Could not extract kernel version from DTK image" >&2
+        return 1
+    fi
+}
+
 # Function to download and extract Neuron driver source from RPM
 download_neuron_driver_source() {
     local version="$1"
@@ -276,10 +307,7 @@ build_kernel_module_for_version() {
     echo "DTK Image ID: ${DTK_IMAGE_ID}"
     
     # Extract kernel version from DTK container
-    echo "Extracting kernel version from DTK image..."
-    KERNEL_VERSION=$(podman run --rm "${dtk_image}" bash -c "awk -F'\"' '/\"KERNEL_VERSION\":/{print \$4}' /etc/driver-toolkit-release.json")
-    
-    if [ -z "${KERNEL_VERSION}" ]; then
+    if ! KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
         echo "Error: Failed to extract kernel version from DTK image"
         return 1
     fi
@@ -446,6 +474,12 @@ mkdir -p "${OUTPUT_DIR}"
 cp "${SCRIPT_DIR}/container/build-module.sh" "${TEMP_DIR}/"
 chmod +x "${TEMP_DIR}/build-module.sh"
 
+# Initialize kernel versions file for GitHub Actions
+if is_github_actions; then
+    echo "Initializing kernel versions file..."
+    touch "${TEMP_DIR}/kernel_versions.txt"
+fi
+
 # Process driver-toolkit.json with environment-specific logic
 echo "Processing driver-toolkit.json..."
 while IFS= read -r entry; do
@@ -466,6 +500,16 @@ while IFS= read -r entry; do
         if [ "${FORCE_BUILD}" != "true" ] && podman pull "${OCP_IMAGE}" >/dev/null 2>&1; then
             echo "Image already exists for OCP ${version}, skipping build..."
             podman rmi "${OCP_IMAGE}" >/dev/null 2>&1 || true
+            
+            # Still need to extract kernel version for release notes
+            dtk_image=$(echo "$entry" | jq -r '.dtk')
+            
+            if KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
+                echo "Storing kernel version for existing image: ${version}|${KERNEL_VERSION}"
+                echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
+            else
+                echo "Warning: Could not extract kernel version from DTK image"
+            fi
             continue
         fi
         
@@ -484,7 +528,10 @@ while IFS= read -r entry; do
         fi
         
         # Store kernel version for release notes
+        echo "Storing kernel version: ${version}|${KERNEL_VERSION}"
         echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
+        echo "Current kernel_versions.txt content:"
+        cat "${TEMP_DIR}/kernel_versions.txt" || echo "File not found or empty"
         
         # Create ECR Public tags - primary (kernel-based) and secondary (OCP-based)
         KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
