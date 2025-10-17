@@ -113,18 +113,47 @@ manage_github_release() {
 These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.
 Select the image that matches your worker nodes kernel version or your OpenShift version:
 - Use kernel-based tags (e.g., \`${driver_version}-5.14.0-...\`) to match specific kernel versions
-- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18.0\`) to match your OpenShift version
+- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18\`) to match your OpenShift version
 
 ## Available Images
+
+### OCP-specific Tags (recommended for broad compatibility)
 "
     
-    # Add each image as a separate line
+    # Add OCP-specific tags
     while IFS= read -r entry; do
         local ocp_version
         ocp_version=$(echo "$entry" | jq -r '.version')
         release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}\`
 "
     done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    
+    # Add kernel-specific tags section
+    release_notes+="
+### Kernel-specific Tags (for exact kernel matching)
+"
+    
+    # Add kernel-specific tags based on DTK entries
+    while IFS= read -r entry; do
+        local ocp_version dtk_image kernel_version
+        ocp_version=$(echo "$entry" | jq -r '.version')
+        dtk_image=$(echo "$entry" | jq -r '.dtk')
+        
+        # Extract kernel version from DTK image name (format: registry.redhat.io/ubi8/driver-toolkit:v4.x.y-z)
+        # The kernel version is typically embedded in the DTK image tag
+        if [[ $dtk_image =~ driver-toolkit:v([0-9]+\.[0-9]+\.[0-9]+-[^[:space:]]+) ]]; then
+            # For now, show placeholder since we can't easily extract kernel version without pulling image
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-<kernel-version>\` (for OCP ${ocp_version})
+"
+        else
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-<kernel-version>\` (for OCP ${ocp_version})
+"
+        fi
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    
+    release_notes+="
+Note: Replace \`<kernel-version>\` with your actual kernel version (e.g., \`5.14.0-427.13.1.el9_4.x86_64\`).
+"
     
     if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
         echo "No OCP versions found in driver-toolkit.json"
