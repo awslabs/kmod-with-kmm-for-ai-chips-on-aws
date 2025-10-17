@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-      contents: read
+      contents: write
     strategy:
       matrix:
         include: ${{ fromJson(needs.setup-matrix.outputs.matrix) }}
