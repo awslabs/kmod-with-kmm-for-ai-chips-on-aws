@@ -538,17 +538,36 @@ if is_github_actions; then
     touch "${TEMP_DIR}/kernel_versions.txt"
 fi
 
-# Process driver-toolkit.json with environment-specific logic
-echo "Processing driver-toolkit.json..."
-while IFS= read -r entry; do
-    version=$(echo "$entry" | jq -r '.version')
+# Get OCP versions to build for this driver from build-matrix.json
+echo "Getting OCP versions for driver ${NEURON_DRIVER_VERSION} from build-matrix.json..."
+OCP_VERSIONS_TO_BUILD=$(jq -r --arg driver "${NEURON_DRIVER_VERSION}" '.[] | select(.driver == $driver) | .ocp_versions[]' "${SCRIPT_DIR}/build-matrix.json")
+
+if [ -z "${OCP_VERSIONS_TO_BUILD}" ]; then
+    echo "No OCP versions found for driver ${NEURON_DRIVER_VERSION} in build-matrix.json"
+    exit 1
+fi
+
+echo "OCP versions to build: $(echo "${OCP_VERSIONS_TO_BUILD}" | tr '\n' ' ')"
+
+# Process each OCP version from build-matrix.json
+for ocp_major in ${OCP_VERSIONS_TO_BUILD}; do
+    echo "Processing OCP major version: ${ocp_major}"
     
-    # Skip if OCP_VERSION is set and version doesn't match the filter
-    if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
-        continue
-    fi
-    
-    if is_github_actions; then
+    # Find all specific OCP versions that match this major version in driver-toolkit.json
+    while IFS= read -r entry; do
+        version=$(echo "$entry" | jq -r '.version')
+        
+        # Check if this OCP version matches the major version pattern
+        if ! [[ "$version" =~ ^${ocp_major}\.[0-9]+$ ]]; then
+            continue
+        fi
+        
+        # Skip if OCP_VERSION is set and version doesn't match the filter
+        if [ -n "${OCP_VERSION}" ] && ! version_matches "$version" "$OCP_VERSION"; then
+            continue
+        fi
+        
+        if is_github_actions; then
         echo "GitHub Actions: Processing OCP version $version"
         
         # Get DTK image from Quay.io (from JSON entry)
@@ -698,10 +717,11 @@ while IFS= read -r entry; do
         podman rmi "${DTK_IMAGE_ID}" || true
     fi
     
-    # Clean the output directory for the next build
-    rm -f "${OUTPUT_DIR}/neuron.ko"
-    
-done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+        # Clean the output directory for the next build
+        rm -f "${OUTPUT_DIR}/neuron.ko"
+        
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+done
 
 # Update GitHub release after all builds complete (GitHub Actions only)
 if is_github_actions; then
