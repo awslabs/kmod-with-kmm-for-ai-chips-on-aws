@@ -193,13 +193,17 @@ FORCE_BUILD=true ./build-kmod-kmm.sh 2.16.7.0
 
 #### Image Tags
 
-**Local/ECR Mode:**
-- Base tag: `neuron-driver${DRIVER_VERSION}-ocp${OCP_VERSION}`
-- Full tag: `neuron-driver${DRIVER_VERSION}-ocp${OCP_VERSION}-kernel${KERNEL_VERSION}`
+**ECR Public (GitHub Actions):**
+- Primary tag (full info): `${DRIVER_VERSION}-ocp${OCP_VERSION}-${KERNEL_VERSION}`
+- Alias tag (convenience): `${DRIVER_VERSION}-ocp${OCP_VERSION}`
 
-**GitHub Actions/GHCR Mode:**
-- Kernel-specific: `${DRIVER_VERSION}-${KERNEL_VERSION}`
-- OCP-specific: `${DRIVER_VERSION}-ocp${OCP_VERSION}`
+**Local/ECR Mode:**
+- Primary tag: `neuron-driver${DRIVER_VERSION}-ocp${OCP_VERSION}-${KERNEL_VERSION}`
+- Alias tag: `neuron-driver${DRIVER_VERSION}-ocp${OCP_VERSION}`
+
+**Examples:**
+- `2.24.7.0-ocp4.18.15-5.14.0-427.68.2.el9_4.x86_64` (primary - includes all version info)
+- `2.24.7.0-ocp4.18.15` (alias - convenience tag)
 
 ## Troubleshooting
 

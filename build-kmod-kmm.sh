@@ -111,31 +111,17 @@ manage_github_release() {
 ## Usage
 
 These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.
-Select the image that matches your worker nodes kernel version or your OpenShift version:
-- Use kernel-based tags (e.g., \`${driver_version}-5.14.0-...\`) to match specific kernel versions
-- Use OCP-based tags (e.g., \`${driver_version}-ocp4.18\`) to match your OpenShift version
+Select the image that matches your requirements:
+- Use full tags (e.g., \`${driver_version}-ocp4.18.15-5.14.0-427.68.2.el9_4.x86_64\`) for complete version information
+- Use alias tags (e.g., \`${driver_version}-ocp4.18.15\`) for convenience
 
 ## Available Images
 
-### OCP-specific Tags (recommended for broad compatibility)
+### Full Tags (recommended - includes all version info)
 "
     
-    # Add OCP-specific tags
-    while IFS= read -r entry; do
-        local ocp_version
-        ocp_version=$(echo "$entry" | jq -r '.version')
-        release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}\`
-"
-    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
-    
-    # Add kernel-specific tags section
-    release_notes+="
-### Kernel-specific Tags (for exact kernel matching)
-"
-    
-    # Generate kernel-specific tags from driver-toolkit.json (same as OCP tags)
-    # Since we use dual tagging, every OCP version has a corresponding kernel tag
-    echo "Generating kernel-specific tags from driver-toolkit.json"
+    # Add full tags with kernel information
+    echo "Generating full tags from driver-toolkit.json"
     while IFS= read -r entry; do
         local ocp_version
         ocp_version=$(echo "$entry" | jq -r '.version')
@@ -144,11 +130,24 @@ Select the image that matches your worker nodes kernel version or your OpenShift
         
         # Extract kernel version from DTK image for this OCP version
         if KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}" 2>/dev/null); then
-            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${KERNEL_VERSION}\` (for OCP ${ocp_version})
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}-${KERNEL_VERSION}\`
 "
         else
-            echo "Warning: Could not extract kernel version for OCP ${ocp_version}, skipping kernel tag" >&2
+            echo "Warning: Could not extract kernel version for OCP ${ocp_version}, skipping" >&2
         fi
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    
+    # Add alias tags section
+    release_notes+="
+### Alias Tags (convenience - OCP version only)
+"
+    
+    # Add OCP-specific alias tags
+    while IFS= read -r entry; do
+        local ocp_version
+        ocp_version=$(echo "$entry" | jq -r '.version')
+        release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}\`
+"
     done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
     
     if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
@@ -552,47 +551,27 @@ while IFS= read -r entry; do
     if is_github_actions; then
         echo "GitHub Actions: Processing OCP version $version"
         
-        # Get DTK image from Quay.io (from JSON entry) - needed for both build and skip scenarios
+        # Get DTK image from Quay.io (from JSON entry)
         dtk_image=$(echo "$entry" | jq -r '.dtk')
         
-        # Extract kernel version first (needed for both tags)
+        # Extract kernel version first
         if ! KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
             echo "Error: Failed to extract kernel version from DTK image for OCP ${version}"
             continue
         fi
         
-        # Define both tags
-        KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
-        OCP_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"
+        # Define new tagging format
+        PRIMARY_TAG="${NEURON_DRIVER_VERSION}-ocp${version}-${KERNEL_VERSION}"  # Full info tag
+        ALIAS_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"                     # Convenience tag
         ECR_IMAGE_BASE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module"
         
-        # Check if BOTH tags already exist (proper dual tagging check)
-        kernel_exists=false
-        ocp_exists=false
-        
-        if [ "${FORCE_BUILD}" != "true" ]; then
-            if podman pull "${ECR_IMAGE_BASE}:${KERNEL_TAG}" >/dev/null 2>&1; then
-                kernel_exists=true
-                podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" >/dev/null 2>&1 || true
-            fi
-            if podman pull "${ECR_IMAGE_BASE}:${OCP_TAG}" >/dev/null 2>&1; then
-                ocp_exists=true
-                podman rmi "${ECR_IMAGE_BASE}:${OCP_TAG}" >/dev/null 2>&1 || true
-            fi
-        fi
-        
-        # Skip build only if BOTH tags exist
-        if [ "${FORCE_BUILD}" != "true" ] && [ "${kernel_exists}" = "true" ] && [ "${ocp_exists}" = "true" ]; then
-            echo "Both kernel and OCP tags already exist for OCP ${version}, skipping build..."
+        # Check if primary tag already exists
+        if [ "${FORCE_BUILD}" != "true" ] && podman pull "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" >/dev/null 2>&1; then
+            echo "Image already exists for OCP ${version}, skipping build..."
+            podman rmi "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" >/dev/null 2>&1 || true
             echo "Storing kernel version for existing image: ${version}|${KERNEL_VERSION}"
             echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
             continue
-        fi
-        
-        # If only one tag exists, we need to rebuild to ensure proper dual tagging
-        if [ "${kernel_exists}" = "true" ] || [ "${ocp_exists}" = "true" ]; then
-            echo "Warning: Only partial tagging found for OCP ${version} (kernel_exists=${kernel_exists}, ocp_exists=${ocp_exists})"
-            echo "Rebuilding to ensure proper dual tagging..."
         fi
         
         # Build kernel module for this version (disable exit-on-error to capture return code)
@@ -610,8 +589,8 @@ while IFS= read -r entry; do
         echo "Storing kernel version: ${version}|${KERNEL_VERSION}"
         echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
         
-        # Build final image with primary tag
-        echo "Building final image with tags: ${KERNEL_TAG}, ${OCP_TAG}"
+        # Build final image with new tagging format
+        echo "Building final image with tags: ${PRIMARY_TAG}, ${ALIAS_TAG}"
         podman build \
             --platform=linux/amd64 \
             --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
@@ -631,23 +610,23 @@ while IFS= read -r entry; do
             --label "neuron-driver.license=GPL-2.0" \
             --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
-            -t "${ECR_IMAGE_BASE}:${KERNEL_TAG}" \
+            -t "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
             "${OUTPUT_DIR}"
         
-        # Add secondary OCP-based tag to same image
+        # Add alias tag to same image
         IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman tag "${IMAGE_ID}" "${ECR_IMAGE_BASE}:${OCP_TAG}"
+        podman tag "${IMAGE_ID}" "${ECR_IMAGE_BASE}:${ALIAS_TAG}"
         
         # Push both tags to ECR Public
         echo "Pushing images to ECR Public..."
-        podman push "${ECR_IMAGE_BASE}:${KERNEL_TAG}"
-        podman push "${ECR_IMAGE_BASE}:${OCP_TAG}"
+        podman push "${ECR_IMAGE_BASE}:${PRIMARY_TAG}"
+        podman push "${ECR_IMAGE_BASE}:${ALIAS_TAG}"
         
         # Clean up the built image
         echo "Cleaning up built image..."
-        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" || true
-        podman rmi "${ECR_IMAGE_BASE}:${OCP_TAG}" || true
+        podman rmi "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" || true
+        podman rmi "${ECR_IMAGE_BASE}:${ALIAS_TAG}" || true
         podman rmi "${IMAGE_ID}" || true
         
         echo "Build completed successfully for OCP version $version"
@@ -672,8 +651,8 @@ while IFS= read -r entry; do
             exit $build_result
         fi
         
-        # Create full tag with kernel version information
-        FULL_TAG="${BASE_TAG}-kernel${KERNEL_VERSION}"
+        # Create full tag with new format
+        FULL_TAG="${BASE_TAG}-${KERNEL_VERSION}"
         
         # Build final image
         echo "Building final image with tag: ${FULL_TAG}"
