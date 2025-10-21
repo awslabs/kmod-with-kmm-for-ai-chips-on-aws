@@ -1,0 +1,210 @@
+# Functional Requirements for build-kmod-kmm.sh
+
+## 1. Environment Detection and Setup
+
+### 1.1 Runtime Environment Detection
+- Detect if running in GitHub Actions (GITHUB_ACTIONS environment variable)
+- Adapt behavior based on environment (local development vs CI/CD)
+
+### 1.2 Tool Validation
+- Validate presence of required tools: aws, jq, podman, rpm2cpio, cpio, wget/curl
+- Skip tool checks in GitHub Actions (pre-installed)
+- Provide installation instructions for missing tools per OS (RHEL/CentOS, Ubuntu/Debian, macOS)
+
+### 1.3 Authentication Setup
+**Local Development:**
+- Validate AWS credentials (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE)
+- Authenticate with private ECR registry
+- Support configurable ECR repository names (KMOD_ECR_REPOSITORY_NAME, DTK_ECR_REPOSITORY_NAME)
+- Auto-detect AWS region and account ID
+
+**GitHub Actions:**
+- Authenticate with Quay.io using QUAY_USERNAME/QUAY_PASSWORD for DTK image access
+- Authenticate with ECR Public (us-east-1 region only) for image publishing
+- Use OIDC authentication for AWS services
+
+## 2. Configuration Management
+
+### 2.1 Build Matrix Parsing
+- Parse build-matrix.json to determine OCP versions for specific driver version
+- Support driver version filtering from command line arguments
+- Validate build-matrix.json exists and contains valid JSON
+- Extract ocp_versions array for specified driver
+
+### 2.2 Driver Toolkit Integration
+- Parse driver-toolkit.json for OCP version to DTK image mappings
+- Filter DTK entries based on build-matrix.json configuration
+- Support major version matching (4.18 matches 4.18.0, 4.18.1, etc.)
+- Handle missing or stale DTK images gracefully
+
+### 2.3 Command Line Interface
+- Accept DRIVER_VERSION as required parameter
+- Accept optional OCP_VERSION filter parameter
+- Support FORCE_BUILD environment variable to override existing image checks
+- Provide usage help and parameter validation
+
+## 3. Source Code Management
+
+### 3.1 Neuron Driver Source Download
+- Download AWS Neuron driver RPM from https://yum.repos.neuron.amazonaws.com/
+- Extract RPM contents using rpm2cpio and cpio
+- Validate successful extraction of driver source code
+- Handle download failures with appropriate error messages
+
+### 3.2 Build Script Preparation
+- Copy container/build-module.sh to temporary build directory
+- Set executable permissions on build script
+- Prepare output directory for kernel module artifacts
+
+## 4. Kernel Module Building
+
+### 4.1 DTK Image Processing
+- Pull DTK images from Quay.io registry
+- Extract kernel version from DTK images (/etc/driver-toolkit-release.json)
+- Validate kernel version format (semantic versioning)
+- Handle DTK image pull failures and stale images
+
+### 4.2 Module Compilation
+- Build kernel modules using DTK containers with podman
+- Mount driver source, build script, and output directories
+- Validate successful compilation (neuron.ko file creation)
+- Handle build failures with proper error reporting
+
+### 4.3 Build Optimization and Deduplication
+- Process all OCP versions from build-matrix.json to collect unique kernel versions
+- Build only one image per unique kernel version (deduplication)
+- Skip builds for existing kernel-tagged images (unless FORCE_BUILD=true)
+- Check if ECR already contains {DRIVER_VERSION}-{KERNEL_VERSION} tag
+- Track OCP-to-kernel mappings for release notes generation
+- Clean up intermediate build artifacts between versions
+
+## 5. Container Image Management
+
+### 5.1 Image Tagging Strategy
+**Kernel-Only Tag Format:** {DRIVER_VERSION}-{KERNEL_VERSION}
+**Consistent across all environments (GitHub Actions and Local Development)**
+
+Examples:
+- 2.24.7.0-5.14.0-427.68.2.el9_4.x86_64
+- 2.24.7.0-6.8.0-47.15.1.el9_4.x86_64
+
+Note: No OCP-specific tags are created. Multiple OCP versions may share the same kernel image.
+
+### 5.2 Image Labeling
+- org.opencontainers.image.version: Driver version
+- org.opencontainers.image.source: GitHub repository URL
+- org.opencontainers.image.created: Build timestamp (ISO 8601)
+- neuron-driver-version: Driver version
+- kernel-version: Kernel version
+- busybox.version: 1.36.1
+- busybox.source: Source URL with backup
+- busybox.license: GPL-2.0
+- busybox.copyright: Copyright notice
+- neuron-driver.source: Modified source tarball URL
+- neuron-driver.license: GPL-2.0
+- neuron-driver.copyright: Amazon copyright
+
+### 5.3 Image Building
+- Use linux/amd64 platform
+- Base image: public.ecr.aws/docker/library/busybox:stable-musl
+- Include compiled kernel module (neuron.ko)
+- Build with Containerfile from container/ directory
+
+## 6. Image Publishing
+
+### 6.1 Registry Targets
+**GitHub Actions:** ECR Public (public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module)
+**Local Development:** Private ECR ({AWS_ACCOUNT_ID}.dkr.ecr.{AWS_REGION}.amazonaws.com)
+
+### 6.2 Push Strategy
+- Push single kernel-based tag per unique kernel version
+- Verify successful push operations
+- Handle push failures with retry logic where appropriate
+- No duplicate images for shared kernel versions across OCP releases
+
+### 6.3 Image Cleanup
+- Remove local images after successful push
+- Clean up DTK images after processing
+- Remove dangling images at completion
+
+## 7. GitHub Release Management (GitHub Actions Only)
+
+### 7.1 Release Notes Generation
+- Create/update GitHub releases with name format: neuron-driver-{DRIVER_VERSION}
+- Generate markdown-formatted release notes with usage instructions
+- List all available kernel-based image tags with format:
+  ```
+  ## Available Images
+  - `2.24.7.0-5.14.0-427.68.2.el9_4.x86_64` (compatible with OCP: 4.18.15, 4.18.16, 4.19.5)
+  - `2.24.7.0-6.8.0-47.15.1.el9_4.x86_64` (compatible with OCP: 4.19.8, 4.19.9)
+  ```
+- Include OCP-to-kernel mapping table for customer reference
+- Track which OCP versions map to each kernel version during build process
+- Filter based on build-matrix.json configuration (only processed OCP versions)
+- Compare release notes to avoid unnecessary updates
+
+### 7.2 Source Code Distribution
+**BusyBox Source:**
+- Download from primary URL: https://github.com/mirror/busybox/archive/refs/tags/1_36_1.tar.gz
+- Fallback URL: https://git.busybox.net/busybox/snapshot/busybox-1.36.1.tar.bz2
+- Attach to GitHub release as busybox-1.36.1.tar.gz
+
+**Neuron Driver Source:**
+- Create tarball of modified driver source (with applied patches)
+- Include from build artifacts: {TEMP_DIR}/usr/src/aws-neuronx-{driver_version}
+- Attach to GitHub release as aws-neuronx-dkms-{driver_version}-modified-source.tar.gz
+
+### 7.3 Release Management
+- Create new releases for new driver versions
+- Update existing releases when OCP versions are added
+- Handle GitHub CLI authentication and API interactions
+- Provide GPL compliance through source code attachments
+
+## 8. Error Handling and Cleanup
+
+### 8.1 Error Handling
+- Use bash strict mode (set -euo pipefail)
+- Validate all external dependencies and file operations
+- Provide meaningful error messages with troubleshooting guidance
+- Handle network failures gracefully (DTK pulls, source downloads)
+- Exit with appropriate error codes
+
+### 8.2 Cleanup Operations
+- Remove temporary directories and files
+- Clean up container images and dangling images
+- Remove intermediate build artifacts
+- Handle cleanup even on script failure (trap handlers)
+
+### 8.3 Logging and Monitoring
+- Provide verbose logging for all major operations
+- Log kernel versions for release notes generation
+- Track build progress and completion status
+- Report warnings for non-critical failures
+
+## 9. Performance and Optimization
+
+### 9.1 Build Efficiency
+- Process only OCP versions specified in build-matrix.json
+- Skip existing image builds unless forced
+- Reuse DTK images when possible
+- Parallel processing where safe
+
+### 9.2 Resource Management
+- Use temporary directories for build isolation
+- Limit concurrent container operations
+- Clean up resources promptly to avoid disk space issues
+- Handle large file operations efficiently
+
+## 10. Security and Compliance
+
+### 10.1 Container Security
+- Use minimal base image (busybox:stable-musl)
+- Include only necessary components (busybox binary + kernel module)
+- Provide source code for GPL compliance
+- Label images with license and copyright information
+
+### 10.2 Credential Management
+- Support multiple AWS authentication methods
+- Avoid logging sensitive information
+- Use secure credential passing for container registries
+- Validate credentials before proceeding with operations
