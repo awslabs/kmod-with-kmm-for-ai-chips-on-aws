@@ -100,59 +100,28 @@ manage_github_release() {
     # Change to repository root for GitHub CLI operations
     cd "${GITHUB_WORKSPACE}"
     
-    # Note: ECR Public doesn't have API for listing tags like GHCR
-    # Generate expected tags based on driver-toolkit.json
-    echo "Generating expected tags for driver version ${driver_version}"
-    
-    # Create release notes with proper markdown formatting
+    # Create release notes with kernel-only format
     local release_notes
     release_notes="Container images for AWS Neuron driver version ${driver_version} compatible with various OpenShift releases and kernel versions.
 
 ## Usage
 
 These images are designed to be used with the Kernel Module Manager (KMM) operator on OpenShift.
-Select the image that matches your requirements:
-- Use full tags (e.g., \`${driver_version}-ocp4.18.15-5.14.0-427.68.2.el9_4.x86_64\`) for complete version information
-- Use alias tags (e.g., \`${driver_version}-ocp4.18.15\`) for convenience
+Use kernel-specific tags that match your cluster's kernel version:
 
 ## Available Images
 
-### Full Tags (recommended - includes all version info)
+### Kernel-Specific Tags (recommended)
 "
     
-    # Add full tags with kernel information
-    echo "Generating full tags from driver-toolkit.json"
-    while IFS= read -r entry; do
-        local ocp_version
-        ocp_version=$(echo "$entry" | jq -r '.version')
-        local dtk_image
-        dtk_image=$(echo "$entry" | jq -r '.dtk')
-        
-        # Extract kernel version from DTK image for this OCP version
-        if KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}" 2>/dev/null); then
-            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}-${KERNEL_VERSION}\`
+    # Read kernel mappings from the build process
+    if [ -f "${TEMP_DIR}/kernel_mappings.txt" ]; then
+        while IFS='|' read -r kernel_version ocp_versions; do
+            release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-${kernel_version}\` (compatible with OCP: ${ocp_versions})
 "
-        else
-            echo "Warning: Could not extract kernel version for OCP ${ocp_version}, skipping" >&2
-        fi
-    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
-    
-    # Add alias tags section
-    release_notes+="
-### Alias Tags (convenience - OCP version only)
-"
-    
-    # Add OCP-specific alias tags
-    while IFS= read -r entry; do
-        local ocp_version
-        ocp_version=$(echo "$entry" | jq -r '.version')
-        release_notes+="- \`public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module:${driver_version}-ocp${ocp_version}\`
-"
-    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
-    
-    if [ -z "$(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")" ]; then
-        echo "No OCP versions found in driver-toolkit.json"
-        return 0
+        done < "${TEMP_DIR}/kernel_mappings.txt"
+    else
+        echo "Warning: kernel_mappings.txt not found, release notes may be incomplete" >&2
     fi
     
     # Check if release needs updating
@@ -532,11 +501,7 @@ mkdir -p "${OUTPUT_DIR}"
 cp "${SCRIPT_DIR}/container/build-module.sh" "${TEMP_DIR}/"
 chmod +x "${TEMP_DIR}/build-module.sh"
 
-# Initialize kernel versions file for GitHub Actions
-if is_github_actions; then
-    echo "Initializing kernel versions file..."
-    touch "${TEMP_DIR}/kernel_versions.txt"
-fi
+
 
 # Get OCP versions to build for this driver from build-matrix.json
 echo "Getting OCP versions for driver ${NEURON_DRIVER_VERSION} from build-matrix.json..."
@@ -549,11 +514,14 @@ fi
 
 echo "OCP versions to build: $(echo "${OCP_VERSIONS_TO_BUILD}" | tr '\n' ' ')"
 
-# Process each OCP version from build-matrix.json
+# Collect unique kernel versions and track OCP mappings
+echo "Collecting kernel versions from OCP versions..."
+declare -A KERNEL_TO_OCPS  # Maps kernel version to list of OCP versions
+
+# First pass: collect all kernel versions and their OCP mappings
 for ocp_major in ${OCP_VERSIONS_TO_BUILD}; do
-    echo "Processing OCP major version: ${ocp_major}"
+    echo "Scanning OCP major version: ${ocp_major}"
     
-    # Find all specific OCP versions that match this major version in driver-toolkit.json
     while IFS= read -r entry; do
         version=$(echo "$entry" | jq -r '.version')
         
@@ -567,59 +535,89 @@ for ocp_major in ${OCP_VERSIONS_TO_BUILD}; do
             continue
         fi
         
-        if is_github_actions; then
-        echo "GitHub Actions: Processing OCP version $version"
-        
-        # Get DTK image from Quay.io (from JSON entry)
+        # Get DTK image and extract kernel version
         dtk_image=$(echo "$entry" | jq -r '.dtk')
         
-        # Extract kernel version first
-        if ! KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
-            echo "Error: Failed to extract kernel version from DTK image for OCP ${version}"
-            continue
+        if KERNEL_VERSION=$(extract_kernel_version_from_dtk "${dtk_image}"); then
+            echo "OCP ${version} uses kernel ${KERNEL_VERSION}"
+            
+            # Add to kernel-to-OCP mapping
+            if [ -n "${KERNEL_TO_OCPS[${KERNEL_VERSION}]:-}" ]; then
+                KERNEL_TO_OCPS[${KERNEL_VERSION}]="${KERNEL_TO_OCPS[${KERNEL_VERSION}]}, ${version}"
+            else
+                KERNEL_TO_OCPS[${KERNEL_VERSION}]="${version}"
+            fi
+        else
+            echo "Warning: Could not extract kernel version for OCP ${version}, skipping"
         fi
-        
-        # Define new tagging format
-        PRIMARY_TAG="${NEURON_DRIVER_VERSION}-ocp${version}-${KERNEL_VERSION}"  # Full info tag
-        ALIAS_TAG="${NEURON_DRIVER_VERSION}-ocp${version}"                     # Convenience tag
+    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+done
+
+# Second pass: build unique kernel images
+echo "Building unique kernel images..."
+for KERNEL_VERSION in "${!KERNEL_TO_OCPS[@]}"; do
+    echo "Processing kernel version: ${KERNEL_VERSION}"
+    echo "Compatible OCP versions: ${KERNEL_TO_OCPS[${KERNEL_VERSION}]}"
+    
+    # Define kernel-only tag
+    KERNEL_TAG="${NEURON_DRIVER_VERSION}-${KERNEL_VERSION}"
+    
+    if is_github_actions; then
         ECR_IMAGE_BASE="public.ecr.aws/q5p6u7h8/neuron-openshift/neuron-kernel-module"
+    else
+        ECR_IMAGE_BASE="${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}"
+    fi
+    
+    # Check if kernel image already exists
+    if [ "${FORCE_BUILD}" != "true" ] && podman pull "${ECR_IMAGE_BASE}:${KERNEL_TAG}" >/dev/null 2>&1; then
+        echo "Kernel image already exists: ${KERNEL_TAG}, skipping build..."
+        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" >/dev/null 2>&1 || true
         
-        # Check if primary tag already exists
-        if [ "${FORCE_BUILD}" != "true" ] && podman pull "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" >/dev/null 2>&1; then
-            echo "Image already exists for OCP ${version}, skipping build..."
-            podman rmi "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" >/dev/null 2>&1 || true
-            echo "Storing kernel version for existing image: ${version}|${KERNEL_VERSION}"
-            echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
-            continue
+        # Store for release notes
+        if is_github_actions; then
+            echo "${KERNEL_VERSION}|${KERNEL_TO_OCPS[${KERNEL_VERSION}]}" >> "${TEMP_DIR}/kernel_mappings.txt"
         fi
+        continue
+    fi
+    
+    # Find any OCP version that uses this kernel for building
+    SAMPLE_OCP=$(echo "${KERNEL_TO_OCPS[${KERNEL_VERSION}]}" | cut -d',' -f1 | xargs)
+    
+    # Get DTK image for this kernel version
+    dtk_image=$(jq -r --arg version "${SAMPLE_OCP}" '.[] | select(.version == $version) | .dtk' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    
+    if [ -z "${dtk_image}" ] || [ "${dtk_image}" = "null" ]; then
+        echo "Error: Could not find DTK image for OCP ${SAMPLE_OCP}"
+        continue
+    fi
+    
+    if is_github_actions; then
+        echo "GitHub Actions: Building kernel image ${KERNEL_TAG}"
         
-        # Build kernel module for this version (disable exit-on-error to capture return code)
+        # Build kernel module for this kernel version
         set +e
-        build_kernel_module_for_version "$version" "$dtk_image"
+        build_kernel_module_for_version "${SAMPLE_OCP}" "${dtk_image}"
         build_result=$?
         set -e
         
         if [ $build_result -ne 0 ]; then
-            echo "Build failed for OCP version $version, exiting..."
+            echo "Build failed for kernel ${KERNEL_VERSION}, exiting..."
             exit $build_result
         fi
         
-        # Store kernel version for release notes
-        echo "Storing kernel version: ${version}|${KERNEL_VERSION}"
-        echo "${version}|${KERNEL_VERSION}" >> "${TEMP_DIR}/kernel_versions.txt"
+        # Store kernel mapping for release notes
+        echo "${KERNEL_VERSION}|${KERNEL_TO_OCPS[${KERNEL_VERSION}]}" >> "${TEMP_DIR}/kernel_mappings.txt"
         
-        # Build final image with new tagging format
-        echo "Building final image with tags: ${PRIMARY_TAG}, ${ALIAS_TAG}"
+        # Build final image with kernel-only tag
+        echo "Building final image with tag: ${KERNEL_TAG}"
         podman build \
             --platform=linux/amd64 \
             --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
-            --build-arg OCP_VERSION="${version}" \
             --label "org.opencontainers.image.version=${NEURON_DRIVER_VERSION}" \
             --label "org.opencontainers.image.source=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --label "neuron-driver-version=${NEURON_DRIVER_VERSION}" \
             --label "kernel-version=${KERNEL_VERSION}" \
-            --label "openshift-version=${version}" \
             --label "busybox.version=1.36.1" \
             --label "busybox.source=https://github.com/mirror/busybox/archive/refs/tags/1_36_1.tar.gz" \
             --label "busybox.source.backup=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/busybox-1.36.1.tar.gz" \
@@ -629,56 +627,49 @@ for ocp_major in ${OCP_VERSIONS_TO_BUILD}; do
             --label "neuron-driver.license=GPL-2.0" \
             --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
-            -t "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" \
+            -t "${ECR_IMAGE_BASE}:${KERNEL_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
             "${OUTPUT_DIR}"
         
-        # Add alias tag to same image
-        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman tag "${IMAGE_ID}" "${ECR_IMAGE_BASE}:${ALIAS_TAG}"
-        
-        # Push both tags to ECR Public
-        echo "Pushing images to ECR Public..."
-        podman push "${ECR_IMAGE_BASE}:${PRIMARY_TAG}"
-        podman push "${ECR_IMAGE_BASE}:${ALIAS_TAG}"
+        # Push kernel image to ECR Public
+        echo "Pushing kernel image to ECR Public..."
+        podman push "${ECR_IMAGE_BASE}:${KERNEL_TAG}"
         
         # Clean up the built image
         echo "Cleaning up built image..."
-        podman rmi "${ECR_IMAGE_BASE}:${PRIMARY_TAG}" || true
-        podman rmi "${ECR_IMAGE_BASE}:${ALIAS_TAG}" || true
+        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
+        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" || true
         podman rmi "${IMAGE_ID}" || true
         
-        echo "Build completed successfully for OCP version $version"
+        echo "Build completed successfully for kernel ${KERNEL_VERSION}"
         
     else
-        echo "Local/Dev: Processing OCP version $version"
+        echo "Local/Dev: Building kernel image ${KERNEL_TAG}"
         
-        # Create base tag for this version
-        BASE_TAG="neuron-driver${NEURON_DRIVER_VERSION}-ocp${version}"
+        # Get DTK image from ECR (use first OCP version that has this kernel)
+        dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${SAMPLE_OCP}"
         
-        # Get DTK image from ECR
-        dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${version}"
-        
-        # Build kernel module for this version (disable exit-on-error to capture return code)
+        # Build kernel module for this kernel version
         set +e
-        build_kernel_module_for_version "$version" "$dtk_image"
+        build_kernel_module_for_version "${SAMPLE_OCP}" "${dtk_image}"
         build_result=$?
         set -e
         
         if [ $build_result -ne 0 ]; then
-            echo "Build failed for OCP version $version, exiting..."
+            echo "Build failed for kernel ${KERNEL_VERSION}, exiting..."
             exit $build_result
         fi
         
-        # Create full tag with new format
-        FULL_TAG="${BASE_TAG}-${KERNEL_VERSION}"
-        
-        # Build final image
-        echo "Building final image with tag: ${FULL_TAG}"
+        # Build final image with kernel-only tag
+        echo "Building final image with tag: ${KERNEL_TAG}"
         podman build \
             --platform=linux/amd64 \
             --build-arg KERNEL_VERSION="${KERNEL_VERSION}" \
-            --build-arg OCP_VERSION="${version}" \
+            --label "org.opencontainers.image.version=${NEURON_DRIVER_VERSION}" \
+            --label "org.opencontainers.image.source=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "neuron-driver-version=${NEURON_DRIVER_VERSION}" \
+            --label "kernel-version=${KERNEL_VERSION}" \
             --label "busybox.version=1.36.1" \
             --label "busybox.source=https://github.com/mirror/busybox/archive/refs/tags/1_36_1.tar.gz" \
             --label "busybox.source.backup=https://github.com/awslabs/kmod-with-kmm-for-ai-chips-on-aws/releases/download/neuron-driver-${NEURON_DRIVER_VERSION}/busybox-1.36.1.tar.gz" \
@@ -688,39 +679,27 @@ for ocp_major in ${OCP_VERSIONS_TO_BUILD}; do
             --label "neuron-driver.license=GPL-2.0" \
             --label "neuron-driver.copyright=Copyright Amazon.com, Inc. or its affiliates" \
             -f "${SCRIPT_DIR}/container/Containerfile" \
-            -t "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" \
+            -t "${ECR_IMAGE_BASE}:${KERNEL_TAG}" \
             --iidfile "${TEMP_DIR}/image.id" \
             "${OUTPUT_DIR}"
         
-        # Add the base tag as well
-        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman tag "${IMAGE_ID}" "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
+        # Push kernel image to private ECR
+        echo "Pushing kernel image to ECR..."
+        podman push "${ECR_IMAGE_BASE}:${KERNEL_TAG}"
         
-        # Push images
-        echo "Pushing images to ECR..."
-        podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}"
-        podman push "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}"
-        
-        # Clean up this version's container images
+        # Clean up container images
         echo "Cleaning up container images..."
-        # First remove the tags
-        podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${FULL_TAG}" || true
-        podman rmi "${ECR_REGISTRY}/${KMOD_ECR_REPOSITORY_NAME}:${BASE_TAG}" || true
-        # Then remove the image by ID to ensure complete removal
+        IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
+        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" || true
         podman rmi "${IMAGE_ID}" || true
     fi
     
-    # Common cleanup for both environments
+    # Clean up DTK image
     echo "Cleaning up DTK image..."
     podman rmi "${dtk_image}" || true
-    if [ -n "${DTK_IMAGE_ID}" ]; then
-        podman rmi "${DTK_IMAGE_ID}" || true
-    fi
     
-        # Clean the output directory for the next build
-        rm -f "${OUTPUT_DIR}/neuron.ko"
-        
-    done < <(jq -c '.[]' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
+    # Clean the output directory for the next build
+    rm -f "${OUTPUT_DIR}/neuron.ko"
 done
 
 # Update GitHub release after all builds complete (GitHub Actions only)
