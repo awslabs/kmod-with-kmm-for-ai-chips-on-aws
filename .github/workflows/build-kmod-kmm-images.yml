@@ -69,8 +69,5 @@ jobs:
           # Make build script executable
           chmod +x ./build-kmod-kmm.sh
           
-          # Build images for each OCP version in the matrix
-          for ocp_version in ${{ join(matrix.ocp_versions, ' ') }}; do
-            echo "Building for OCP version: ${ocp_version}"
-            ./build-kmod-kmm.sh "${{ matrix.driver }}" "${ocp_version}"
-          done
+          # Build all kernel images for this driver (script handles OCP version iteration and deduplication)
+          ./build-kmod-kmm.sh "${{ matrix.driver }}"
