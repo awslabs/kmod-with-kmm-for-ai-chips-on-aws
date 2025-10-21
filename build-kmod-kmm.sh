@@ -275,14 +275,23 @@ extract_kernel_version_from_dtk() {
         # Basic format validation: should contain version numbers and dots
         if [[ "${kernel_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             echo "Successfully extracted kernel version: ${kernel_version}" >&2
+            
+            # Clean up DTK image immediately after extraction to save disk space
+            echo "Cleaning up DTK image after extraction: ${dtk_image}" >&2
+            podman rmi "${dtk_image}" >/dev/null 2>&1 || true
+            
             echo "${kernel_version}"
             return 0
         else
             echo "Error: Invalid kernel version format: ${kernel_version}" >&2
+            # Clean up DTK image even on error
+            podman rmi "${dtk_image}" >/dev/null 2>&1 || true
             return 1
         fi
     else
         echo "Error: Could not extract valid kernel version from DTK image" >&2
+        # Clean up DTK image even on error
+        podman rmi "${dtk_image}" >/dev/null 2>&1 || true
         return 1
     fi
 }
