@@ -10,6 +10,9 @@ on:
 env:
   ASH_OUTPUT_PATH: ash_output
 
+permissions:
+  contents: read
+
 jobs:
   ash-scan:
     name: Run ASH Scan
