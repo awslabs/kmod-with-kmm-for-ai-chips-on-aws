@@ -41,7 +41,7 @@ echo "[" > "$temp_json"
 
 first_entry=true
 for major in {4..4}; do
-    for minor in {16..19}; do
+    for minor in {16..20}; do
         page=1
         while true; do
             response=$(curl -s "https://quay.io/api/v1/repository/openshift-release-dev/ocp-release/tag/?onlyActiveTags=true&filter_tag_name=like:${major}.${minor}.&page=$page&limit=100")
