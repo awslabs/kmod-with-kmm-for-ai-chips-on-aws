@@ -1,7 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+# Check bash version (need 4+ for associative arrays)
+if [ "${BASH_VERSINFO:-0}" -lt 4 ]; then
+    echo "Error: This script requires bash 4 or higher (current: ${BASH_VERSION})"
+    echo "macOS ships with bash 3.2. Install bash 4+ with: brew install bash"
+    echo "Then ensure /opt/homebrew/bin is in your PATH before /bin"
+    exit 1
+fi
 
 echo "Script starting..."
 
@@ -478,15 +486,15 @@ else
         echo "These credentials are needed to pull DTK images from quay.io"
         exit 1
     fi
-    
-    # Authenticate with ECR Public for pushing images (required in GitHub Actions)
-    # Note: ECR Public only operates in us-east-1 region
-    echo "Logging into ECR Public..."
-    if ! aws ecr-public get-login-password --region us-east-1 --no-cli-pager | \
-        podman login --username AWS --password-stdin public.ecr.aws; then
-        echo "Error: Failed to authenticate with ECR Public"
-        exit 1
-    fi
+fi
+
+# Authenticate with ECR Public for busybox base image (required for both local and GitHub Actions)
+# Note: ECR Public only operates in us-east-1 region
+echo "Logging into ECR Public..."
+if ! aws ecr-public get-login-password --region us-east-1 --no-cli-pager | \
+    podman login --username AWS --password-stdin public.ecr.aws; then
+    echo "Error: Failed to authenticate with ECR Public"
+    exit 1
 fi
 
 # Store the original script directory before changing directories
@@ -509,6 +517,9 @@ mkdir -p "${OUTPUT_DIR}"
 # Copy build script to temp directory
 cp "${SCRIPT_DIR}/container/build-module.sh" "${TEMP_DIR}/"
 chmod +x "${TEMP_DIR}/build-module.sh"
+
+# Copy licenses directory to output directory for container build
+cp -r "${SCRIPT_DIR}/container/licenses" "${OUTPUT_DIR}/"
 
 
 
@@ -647,16 +658,16 @@ for KERNEL_VERSION in "${!KERNEL_TO_OCPS[@]}"; do
         # Clean up the built image
         echo "Cleaning up built image..."
         IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" || true
-        podman rmi "${IMAGE_ID}" || true
+        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" 2>/dev/null || true
+        podman rmi "${IMAGE_ID}" 2>/dev/null || true
         
         echo "Build completed successfully for kernel ${KERNEL_VERSION}"
         
     else
         echo "Local/Dev: Building kernel image ${KERNEL_TAG}"
         
-        # Get DTK image from ECR (use first OCP version that has this kernel)
-        dtk_image="${ECR_REGISTRY}/${DTK_ECR_REPOSITORY_NAME}:${SAMPLE_OCP}"
+        # Get DTK image from Quay.io (same as GitHub Actions)
+        dtk_image=$(jq -r --arg version "${SAMPLE_OCP}" '.[] | select(.version == $version) | .dtk' "${SCRIPT_DIR}/driver-toolkit/driver-toolkit.json")
         
         # Build kernel module for this kernel version
         set +e
@@ -699,8 +710,8 @@ for KERNEL_VERSION in "${!KERNEL_TO_OCPS[@]}"; do
         # Clean up container images
         echo "Cleaning up container images..."
         IMAGE_ID=$(cat "${TEMP_DIR}/image.id")
-        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" || true
-        podman rmi "${IMAGE_ID}" || true
+        podman rmi "${ECR_IMAGE_BASE}:${KERNEL_TAG}" 2>/dev/null || true
+        podman rmi "${IMAGE_ID}" 2>/dev/null || true
     fi
     
     # Clean up DTK image
@@ -723,7 +734,7 @@ rm -rf "${TEMP_DIR}"
 
 # Clean up any dangling images (those with <none> as repository and tag)
 echo "Cleaning up dangling images..."
-cd "${GITHUB_WORKSPACE}" || cd /tmp
+cd "${GITHUB_WORKSPACE:-/tmp}"
 DANGLING_IMAGES=$(podman images -f "dangling=true" -q)
 if [ -n "${DANGLING_IMAGES}" ]; then
     podman rmi "${DANGLING_IMAGES}" || true
