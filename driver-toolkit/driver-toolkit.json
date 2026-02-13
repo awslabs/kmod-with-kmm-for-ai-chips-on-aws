@@ -821,6 +821,11 @@
   },
   {
     "arch": "x86_64",
+    "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:e00b1e4d320fe787729b7286fbbe6599af1f1ced276c14d4bfeb380036bc4f60",
+    "version": "4.19.24"
+  },
+  {
+    "arch": "x86_64",
     "dtk": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:e90becf264c54e3d0518fa38fb07fe8ffdbbe9660a4759e52e3fc0002b5c3f06",
     "version": "4.20.0"
   },
