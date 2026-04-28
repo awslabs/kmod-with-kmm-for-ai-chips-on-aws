@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 env:
-  ASH_OUTPUT_PATH: ash_output
+  ASH_OUTPUT_PATH: .ash/ash_output
 
 permissions:
   contents: read
@@ -18,26 +18,22 @@ jobs:
     name: Run ASH Scan
     runs-on: ubuntu-latest
     steps:
-      # Third-party tool: Automated Security Helper (ASH) from awslabs
-      # Used for security scanning to detect secrets and configuration issues
-      - name: Checkout ASH
-        uses: actions/checkout@v4
-        with:
-          path: ./automated-security-helper
-          repository: awslabs/automated-security-helper
-          ref: v2.0.1
       - name: Checkout repo
         uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: ./repo
+          python-version: '3.10'
+      # Third-party tool: Automated Security Helper (ASH) from awslabs
+      # Used for security scanning to detect secrets and configuration issues
+      - name: Install ASH
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.3.0
       - name: Run ASH scan
-        run: |
-          export PATH="$(pwd)/automated-security-helper:$PATH"
-          ash --source-dir "$(pwd)/repo" --output-dir "${{ env.ASH_OUTPUT_PATH }}"
+        run: ash --mode local
       - name: Upload scan results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ env.ASH_OUTPUT_PATH }}
+          name: ash-results
           path: ${{ env.ASH_OUTPUT_PATH }}
           include-hidden-files: true
