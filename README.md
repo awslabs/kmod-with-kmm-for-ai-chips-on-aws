@@ -121,7 +121,7 @@ This project uses several third-party GitHub Actions to automate workflows:
 
 - [peter-evans/create-pull-request](https://github.com/peter-evans/create-pull-request): Automates pull request creation for driver toolkit updates
 - [ludeeus/action-shellcheck](https://github.com/ludeeus/action-shellcheck): GitHub Action for [ShellCheck](https://www.shellcheck.net/) to validate shell script syntax in pull requests
-- [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper): Security scanning tool for detecting secrets and configuration issues in pull requests
+- [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper): Security scanning tool (v3.3.0, installed via pip) for detecting secrets and configuration issues in pull requests
 
 These third-party actions help streamline our build and security processes. Users are encouraged to evaluate these dependencies and implement alternative mechanisms that best suit their organizational requirements and security policies.
 
