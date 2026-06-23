@@ -38,6 +38,17 @@ if ! version_lt "${DRIVER_VERSION}" "2.22.2.0"; then
     sed -i 's/RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5)/RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 4)/g' neuron_cdev.c
 fi
 
+# Patch for RHEL 9.6+ (kernel 5.14.0-570+)
+# Issue: neuron_mmap.h uses mm_get_unmapped_area() for RHEL >= 9.5, but RHEL 9.6
+#        removed mm_get_unmapped_area() from its kernel headers (backport of Linux 6.10 change).
+#        The correct API for RHEL 9.6+ is current->mm->get_unmapped_area() (same as pre-9.5).
+# Fix: Restrict the mm_get_unmapped_area path to only RHEL 9.5 by tightening the upper bound.
+RHEL_MINOR=$(echo "${KERNEL_VERSION}" | sed -n 's/.*el[0-9][_\.]\([0-9]*\).*/\1/p')
+if [ "${RHEL_MINOR:-0}" -ge 6 ] 2>/dev/null; then
+    echo "RHEL 9.${RHEL_MINOR} detected, applying neuron_mmap.h mm_get_unmapped_area patch..."
+    sed -i 's/RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5)/RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5) \&\& RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 6)/g' neuron_mmap.h
+fi
+
 # Build the module
 echo "Building kernel module..."
 make -C /lib/modules/"${KERNEL_VERSION}"/build M="$(pwd)" modules
