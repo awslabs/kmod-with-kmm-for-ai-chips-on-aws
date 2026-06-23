@@ -39,14 +39,17 @@ if ! version_lt "${DRIVER_VERSION}" "2.22.2.0"; then
 fi
 
 # Patch for RHEL 9.6+ (kernel 5.14.0-570+)
-# Issue: neuron_mmap.h uses mm_get_unmapped_area() for RHEL >= 9.5, but RHEL 9.6
-#        removed mm_get_unmapped_area() from its kernel headers (backport of Linux 6.10 change).
-#        The correct API for RHEL 9.6+ is current->mm->get_unmapped_area() (same as pre-9.5).
-# Fix: Restrict the mm_get_unmapped_area path to only RHEL 9.5 by tightening the upper bound.
+# Issue: neuron_mmap.h selects mm_get_unmapped_area() for RHEL >= 9.5, but on RHEL 9.6+
+#        that function does not exist (verified via /proc/kallsyms on 5.14.0-570.el9_6:
+#        no mm_get_unmapped_area symbol). The pre-9.5 fallback (mm->get_unmapped_area)
+#        also fails because the get_unmapped_area field was removed from mm_struct.
+# Fix: For RHEL 9.6+, call the global get_unmapped_area() instead. It exists, is
+#      EXPORT_SYMBOL'd (verified: __ksymtab_get_unmapped_area present), is declared in
+#      linux/mm.h, and its signature (file, addr, len, pgoff, flags) matches the macro args.
 RHEL_MINOR=$(echo "${KERNEL_VERSION}" | sed -n 's/.*el[0-9][_\.]\([0-9]*\).*/\1/p')
 if [ "${RHEL_MINOR:-0}" -ge 6 ] 2>/dev/null; then
-    echo "RHEL 9.${RHEL_MINOR} detected, applying neuron_mmap.h mm_get_unmapped_area patch..."
-    sed -i 's/RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5)/RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9, 5) \&\& RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9, 6)/g' neuron_mmap.h
+    echo "RHEL 9.${RHEL_MINOR} detected, patching neuron_mmap.h to use global get_unmapped_area()..."
+    sed -i 's/mm_get_unmapped_area(current->mm, filep, addr, len, pgoff, flags)/get_unmapped_area(filep, addr, len, pgoff, flags)/g' neuron_mmap.h
 fi
 
 # Build the module
